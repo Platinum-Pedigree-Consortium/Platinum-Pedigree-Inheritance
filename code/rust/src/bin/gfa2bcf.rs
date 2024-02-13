@@ -73,9 +73,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let gfa = gfa::File::from_path(&args.gfa)?;
-    for (segment_id, segment) in gfa.segments.iter().enumerate() {
-        let range = gfa.out_edges(segment_id);
-        eprintln!("segment {} has {} out edges", segment.name(), range.count());
+    if log::log_enabled!(log::Level::Debug) {
+        for (segment_id, segment) in gfa.segments.iter().enumerate() {
+            let range = gfa.out_edges(segment_id);
+            eprintln!("segment {} has {} out edges", segment.name(), range.count());
+        }
     }
     log::info!("Loaded gfa: {gfa}");
     Ok(())
