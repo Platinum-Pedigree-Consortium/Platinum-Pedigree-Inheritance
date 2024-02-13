@@ -74,6 +74,10 @@ fn main() {
         Format::Vcf,
     )
     .unwrap();
+    // 1 overlaps annotation same hap
+    // 2 - overlaps annotation same hap
+    // json: key allele, value annotation. Two kidns: (overlap [two phased variants overlapping same hap: impossible], overlap but other hap = pass)
+    // problem:
 
     for record_result in bcf.records() {
         let record = record_result.expect("Fail to read record");
