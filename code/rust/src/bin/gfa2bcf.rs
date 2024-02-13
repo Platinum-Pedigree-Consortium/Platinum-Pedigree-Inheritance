@@ -1,15 +1,12 @@
-use clap::Parser;
 use concordance::gfa;
-use log::info;
-use std::boxed::Box;
-use std::collections::HashSet;
-use std::fmt;
-use std::fs::read_to_string;
-use std::fs::File;
-use std::io::Write;
-use std::path::PathBuf;
 
+use clap::Parser;
 use log::LevelFilter;
+use rust_htslib::bcf::{self, Read};
+
+use std::boxed::Box;
+use std::fmt;
+use std::path::PathBuf;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -17,12 +14,19 @@ use log::LevelFilter;
 struct Args {
     #[clap(help = "Path to input gfa")]
     gfa: PathBuf,
-    #[arg(short, long, help = "Input vcf path")]
+    #[arg(short, long, help = "Input {b,v}cf path")]
     vcf: PathBuf,
     #[arg(short, long, help = "Output bcf path")]
-    bcf: PathBuf,
+    bcf: Option<PathBuf>,
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count, default_value_t = 0)]
     verbosity: u8,
+    #[arg(
+        short,
+        long,
+        help = "Emit uncompressed output",
+        default_value_t = false
+    )]
+    uncompressed: bool,
 }
 
 #[derive(Debug)]
@@ -58,6 +62,37 @@ impl fmt::Display for VcfRecord {
     }
 }
 
+fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+    log::info!("Loading gfa: {:?}.", args.gfa);
+    let gfa = gfa::File::from_path(&args.gfa)?;
+
+    if log::log_enabled!(log::Level::Debug) {
+        for (segment_id, segment) in gfa.segments.iter().enumerate() {
+            let range = gfa.out_edges(segment_id);
+            eprintln!("segment {} has {} out edges", segment.name(), range.count());
+        }
+    }
+
+    log::info!("Loaded gfa: {:?}.", args.gfa);
+    log::info!("Opening vcf: {:?}.", args.vcf);
+    let mut reader = bcf::Reader::from_path(&args.vcf)?;
+    let header = bcf::Header::from_template(reader.header()); // TODO: add new header info potentially.
+
+    let bcf = args
+        .bcf
+        .as_ref()
+        .map_or("-".to_string(), |x| x.display().to_string());
+    let mut writer = bcf::Writer::from_path(&bcf, &header, args.uncompressed, bcf::Format::Bcf)?;
+    for record in reader.records() {
+        let mut record = record?;
+        writer.translate(&mut record);
+        // Process
+        writer.write(&record)?;
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
@@ -72,13 +107,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter_level(filter_level)
         .init();
 
-    let gfa = gfa::File::from_path(&args.gfa)?;
-    if log::log_enabled!(log::Level::Debug) {
-        for (segment_id, segment) in gfa.segments.iter().enumerate() {
-            let range = gfa.out_edges(segment_id);
-            eprintln!("segment {} has {} out edges", segment.name(), range.count());
-        }
-    }
-    log::info!("Loaded gfa: {gfa}");
+    core(&args)?;
+
     Ok(())
 }
