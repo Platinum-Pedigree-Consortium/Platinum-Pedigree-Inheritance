@@ -1,5 +1,7 @@
 use clap::Parser;
+use concordance::gfa;
 use log::info;
+use std::boxed::Box;
 use std::collections::HashSet;
 use std::fmt;
 use std::fs::read_to_string;
@@ -13,7 +15,7 @@ use log::LevelFilter;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(short, long)]
+    #[clap(help = "Path to input gfa")]
     gfa: PathBuf,
     #[arg(short, long, help = "Input vcf path")]
     vcf: PathBuf,
@@ -56,10 +58,7 @@ impl fmt::Display for VcfRecord {
     }
 }
 
-fn main() {
-    let mut failed_sites: i64 = 0;
-    let mut passed_sites: i64 = 0;
-
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     let filter_level: LevelFilter = match args.verbosity {
@@ -72,4 +71,8 @@ fn main() {
         .format_timestamp_millis()
         .filter_level(filter_level)
         .init();
+
+    let gfa = gfa::File::from_path(&args.gfa)?;
+    log::info!("Loaded gfa: {gfa}");
+    Ok(())
 }
