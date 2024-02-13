@@ -86,6 +86,7 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     for record in reader.records() {
         let mut record = record?;
         writer.translate(&mut record);
+        record.unpack();
         // Process
         writer.write(&record)?;
     }
