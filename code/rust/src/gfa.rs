@@ -1,8 +1,22 @@
 use std::boxed::Box;
+use std::collections::HashMap;
+use std::path::Path;
 use std::str::FromStr;
 
 pub enum Category {
     Segment,
+}
+
+impl std::fmt::Display for Category {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Segment => "S",
+            }
+        )
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -26,10 +40,19 @@ impl std::str::FromStr for Category {
     }
 }
 
+///
+///
+///```
+/// use concordance::gfa::Line;
+/// use std::str::FromStr;
+/// let line = Line::from_str("S\tS1\tACGT\tAC:Z:0").expect("Failed to parse line");
+/// eprintln!("Line: {line}");
+/// assert_eq!(line.to_string(), "S\tS1\tACGT\tAC:Z:0");
+///```
 pub struct Line {
     pub category: Category,
     pub name: String,
-    pub sequence: Vec<u8>,
+    pub sequence: String,
     pub tags: Vec<String>,
 }
 
@@ -48,7 +71,6 @@ impl std::str::FromStr for Line {
         let sequence = toks
             .next()
             .ok_or_else(|| Error(format!("Expected seq type in malformatted string {s}")))?
-            .as_bytes()
             .to_owned();
         let tags = toks.map(|x| x.to_string()).collect::<Vec<_>>();
         Ok(Self {
@@ -60,19 +82,60 @@ impl std::str::FromStr for Line {
     }
 }
 
+impl std::fmt::Display for Line {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let res = write!(f, "{}\t{}\t{}", self.category, self.name, self.sequence);
+        res.and_then(|x| {
+            if !self.tags.is_empty() {
+                write!(
+                    f,
+                    "\t{}",
+                    itertools::Itertools::intersperse(self.tags.iter().map(|x| &x[..]), "\t")
+                        .collect::<String>()
+                )
+            } else {
+                Ok(x)
+            }
+        })
+    }
+}
+
 pub struct File {
     pub lines: Vec<Line>,
+    pub name2idx: HashMap<String, usize>,
 }
 
 impl File {
+    /// Build `gfa::File` from a type implementing `std::io::Read`
+    ///
+    /// # Errors
+    /// 1. Lines not valid UTF-8.
+    /// 2. Lines are not valid gfa.
+    /// 3. Lines are gfa lines we don't support yet.
     pub fn from_reader(x: impl std::io::Read) -> Result<Self, Box<dyn std::error::Error>> {
         use std::io::BufRead;
         let reader = std::io::BufReader::new(x);
         let mut lines = Vec::with_capacity(8192);
-        for input in reader.lines() {
+        let mut name2idx = HashMap::new();
+        for (idx, input) in reader.lines().enumerate() {
             let input = input?;
-            lines.push(Line::from_str(&input)?);
+            let line = Line::from_str(&input)?;
+            name2idx.insert(line.name.clone(), idx);
+            lines.push(line);
         }
-        Ok(Self { lines })
+        Ok(Self { lines, name2idx })
+    }
+
+    /// Build `gfa::File` from a `Path`.
+    ///
+    /// # Errors
+    /// 1. File does not exist.
+    /// 2. Cannot read from file.
+    /// 3. Lines not valid UTF-8.
+    /// 4. Lines are not valid gfa.
+    /// 5. Lines are gfa lines we don't support yet.
+    pub fn from_path(x: impl AsRef<Path>) -> Result<Self, Box<dyn std::error::Error>> {
+        let path = std::fs::File::open(x.as_ref())?;
+        Self::from_reader(path)
     }
 }
