@@ -59,6 +59,7 @@ impl std::str::FromStr for Category {
 /// let line = Line::from_str("S\tS1\tACGT\tAC:Z:0").expect("Failed to parse line");
 /// eprintln!("Line: {line}");
 /// assert_eq!(line.to_string(), "S\tS1\tACGT\tAC:Z:0");
+/// assert_eq!(line.name(), "S1");
 ///```
 #[derive(Clone, Default)]
 pub struct Line {
@@ -74,15 +75,28 @@ pub struct Line {
 }
 
 impl Line {
+    #[must_use]
+    pub fn name(&self) -> String {
+        if let Some(name) = &self.name {
+            name.clone()
+        } else {
+            format!("{:?}->{:?}", self.from().unwrap(), self.to().unwrap())
+        }
+    }
+
+    #[must_use]
     fn from(&self) -> Option<&String> {
         self.from.as_ref()
     }
+
+    #[must_use]
     fn to(&self) -> Option<&String> {
         self.to.as_ref()
     }
 }
 
 /// Store orientation as a bool. True = forward strand.
+#[must_use]
 fn orientation(s: &str) -> bool {
     match s {
         "+" => true,
@@ -93,6 +107,7 @@ fn orientation(s: &str) -> bool {
     }
 }
 
+#[must_use]
 fn fmtstrand(x: bool) -> char {
     if x {
         '+'
@@ -303,6 +318,20 @@ impl File {
     pub fn from_path(x: impl AsRef<Path>) -> Result<Self, Box<dyn std::error::Error>> {
         let path = std::fs::File::open(x.as_ref())?;
         Self::from_reader(path)
+    }
+
+    /// Returns all excident edges for a given segment id.
+    /// # Panics
+    /// Panics if start > end, which can never happen in software as `0 < usize::MAX`.
+    #[must_use]
+    pub fn out_edges(
+        &self,
+        idx: usize,
+    ) -> std::collections::btree_map::Range<'_, (usize, usize), usize> {
+        self.edges.range((
+            std::ops::Bound::Included(&(idx, 0)),
+            std::ops::Bound::Included(&(idx, usize::MAX)),
+        ))
     }
 }
 
