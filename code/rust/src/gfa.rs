@@ -333,6 +333,10 @@ impl File {
             std::ops::Bound::Included(&(idx, usize::MAX)),
         ))
     }
+
+    pub fn segment_id(&self, name: &String) -> Option<usize> {
+        self.name2idx.get(name).copied()
+    }
 }
 
 impl std::fmt::Display for File {
