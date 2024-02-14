@@ -213,7 +213,6 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         let record_data = VcfFields::new(&record)?;
         all_records.push((record, record_data));
     }
-    let mut outf = std::io::BufWriter::new(std::fs::File::create("out-data.tsv")?);
     log::info!("Read in data, processing");
     // chr1:148288481
     // chr1:150411409
@@ -249,67 +248,13 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                 }
             })
             .collect::<Vec<Vec<(Orientation, String)>>>();
+        assert_eq!(walks.len(), data.alen.len());
         let seqs = walks
             .iter()
             .map(|x| make_seq(&x[..], &gfa))
             .collect::<Vec<_>>();
         let alens = seqs.iter().map(|x| x.len() as i32).collect::<Vec<_>>();
         assert_eq!(alens, data.alen);
-        /*
-        let seqs = walks
-            .iter()
-            .map(|walk| {
-                let mut ret: Vec<String> = Vec::new();
-                for (orient, vertex) in walk {
-                    if *orient == Orientation::Star {
-                        ret.push("*".into());
-                    } else {
-                        let vtx = gfa
-                            .segment_id(&vertex)
-                            .unwrap_or_else(|| panic!("Missing vertex {vertex}"));
-                        let vtx = &gfa.segments[vtx];
-                        let seq = vtx
-                            .sequence
-                            .as_ref()
-                            .expect("segment for vertex does not have a sequence");
-                        ret.push(if *orient == Orientation::Forward {
-                            seq.clone()
-                        } else {
-                            rc(&seq)
-                        })
-                    }
-                }
-                ret
-            })
-            .collect::<Vec<_>>();
-        log::debug!(
-            "Walk: {walks:?} yields seqs {:?} for data {data:?} and record {record:?}",
-            seqs.iter().map(|x| x.len()).collect::<Vec<_>>()
-        );
-        let seqs = walk
-            .iter()
-            .map(|WalkStep(vertex, orientation)| {
-                if vertex.is_empty() {
-                    "*".to_string()
-                } else {
-                    let vtx = gfa
-                        .segment_id(&vertex)
-                        .unwrap_or_else(|| panic!("Missing vertex {vertex}"));
-                    let vtx = &gfa.segments[vtx];
-                    let seq = vtx
-                        .sequence
-                        .as_ref()
-                        .expect("segment for vertex does not have a sequence");
-                    if orientation == Orientation::Forward {
-                        seq.clone()
-                    } else {
-                        rc(&seq)
-                    }
-                }
-            })
-            .collect::<Vec<_>>();
-        writeln!(outf, "{seqs:?}\t{walks:?}\t{data:?}")?;
-        */
         let pos = record.pos() as i32;
         let id = String::from_utf8(record.id()).expect("id not utf-8");
         if TRUTH.contains(&pos) {
@@ -319,8 +264,14 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                 record.desc()
             );
         }
+        if !seqs.is_empty() {
+            let alleles = seqs
+                .iter()
+                .map(|x| &x.as_bytes()[..])
+                .collect::<Vec<&[u8]>>();
+            record.set_alleles(&alleles[..])?;
+        }
     }
-    drop(outf);
 
     log::info!("Processed, writing out");
     for (record, _data) in &all_records {
