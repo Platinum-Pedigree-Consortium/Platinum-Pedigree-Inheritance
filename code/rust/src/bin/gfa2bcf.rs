@@ -145,8 +145,10 @@ impl VcfFields {
     }
 }
 
+/*
 #[derive(Debug)]
 struct WalkStep(pub String, pub Orientation);
+*/
 
 fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Loading gfa: {:?}.", args.gfa);
@@ -182,6 +184,11 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut outf = std::io::BufWriter::new(std::fs::File::create("out-data.tsv")?);
     log::info!("Read in data, processing");
+    // chr1:148288481
+    // chr1:150411409
+    const _TRUE_INSERTION: (i32, i32) = (0, 148_288_482 - 1); //chr1    148288482
+    const _TRUE_DELETION: (i32, i32) = (0, 150_411_410 - 1); // chr1    150411410
+    const TRUTH: &[i32] = &[_TRUE_INSERTION.1, _TRUE_DELETION.1];
     for (record, data) in &mut all_records {
         let vertex_start_str = data.vertex_start();
         log::trace!("Getting vertex start: {vertex_start_str}");
@@ -200,21 +207,48 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             )
         });
         log::trace!("VE,VS: {vertex_start}, {vertex_end} ({vertex_start_str}, {vertex_end_str})");
-        let walk = data
+        let walks = data
             .allele_walk
             .iter()
             .map(|x| {
-                WalkStep(
-                    x[1..].to_string(),
-                    Orientation::new(
-                        x.chars()
-                            .next()
-                            .expect("Walk step needs at least one character"),
-                    ),
-                )
+                if x == "*" {
+                    vec![(Orientation::Star, "*".to_owned())]
+                } else {
+                    gfa::decompose_walk(x)
+                }
             })
             .collect::<Vec<_>>();
-        log::debug!("Walk: {walk:?} for data {data:?} and record {record:?}");
+        let seqs = walks
+            .iter()
+            .map(|walk| {
+                let mut ret: Vec<String> = Vec::new();
+                for (orient, vertex) in walk {
+                    if *orient == Orientation::Star {
+                        ret.push("*".into());
+                    } else {
+                        let vtx = gfa
+                            .segment_id(&vertex)
+                            .unwrap_or_else(|| panic!("Missing vertex {vertex}"));
+                        let vtx = &gfa.segments[vtx];
+                        let seq = vtx
+                            .sequence
+                            .as_ref()
+                            .expect("segment for vertex does not have a sequence");
+                        ret.push(if *orient == Orientation::Forward {
+                            seq.clone()
+                        } else {
+                            rc(&seq)
+                        })
+                    }
+                }
+                ret
+            })
+            .collect::<Vec<_>>();
+        log::debug!(
+            "Walk: {walks:?} yields seqs {:?} for data {data:?} and record {record:?}",
+            seqs.iter().map(|x| x.len()).collect::<Vec<_>>()
+        );
+        /*
         let seqs = walk
             .iter()
             .map(|WalkStep(vertex, orientation)| {
@@ -229,7 +263,7 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                         .sequence
                         .as_ref()
                         .expect("segment for vertex does not have a sequence");
-                    if *orientation == Orientation::Forward {
+                    if orientation == Orientation::Forward {
                         seq.clone()
                     } else {
                         rc(&seq)
@@ -237,11 +271,19 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                 }
             })
             .collect::<Vec<_>>();
-        writeln!(outf, "{seqs:?}\t{walk:?}\t{data:?}");
+        */
+        writeln!(outf, "{seqs:?}\t{walks:?}\t{data:?}")?;
+        let pos = record.pos() as i32;
+        let id = String::from_utf8(record.id()).expect("id not utf-8");
+        if TRUTH.contains(&pos) {
+            log::info!(
+                "Walk: {walks:?} yields seqs {:?} for data {data:?} and record {record:?}/{}/{id}",
+                seqs.iter().map(|x| x.len()).collect::<Vec<_>>(),
+                record.desc()
+            );
+        }
     }
     drop(outf);
-    const _TRUE_INSERTION: (i32, i32) = (0, 148_288_482 - 1); //chr1    148288482
-    const _TRUE_DELETION: (i32, i32) = (0, 150_411_410 - 1); // chr1    150411410
 
     log::info!("Processed, writing out");
     for (record, _data) in &all_records {
