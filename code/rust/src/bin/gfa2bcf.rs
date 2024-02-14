@@ -83,7 +83,7 @@ pub fn rc(x: &str) -> String {
 }
 
 #[derive(Debug)]
-struct VcfFields {
+struct VariantDatum {
     // "END=373973;AN=7;NS=7;NA=2;ALEN=74,0;AC=2;VS=>s24;VE=>s25;AWALK=>s67628,*"
     pub end: Option<i32>,
     pub alen: Vec<i32>,
@@ -92,7 +92,7 @@ struct VcfFields {
     vertex_end: String,
 }
 
-impl VcfFields {
+impl VariantDatum {
     pub fn new(record: &bcf::Record) -> Result<Self, Box<dyn std::error::Error>> {
         let end = record.info(b"END"); //("END tag missing");
         let alen = record.info(b"ALEN"); //("ALEN tag missing");
@@ -170,15 +170,24 @@ fn extract_seq(input: (&Orientation, &String), gfa: &gfa::File) -> String {
     }
 }
 
+fn dot_if_empty(mut x: String) -> String {
+    if x.is_empty() {
+        x.push('.');
+    }
+    x
+}
+
 fn make_seq(alleles: &[(Orientation, String)], gfa: &gfa::File) -> String {
-    Itertools::intersperse(
-        alleles.iter().map(|(orient, seq)| match orient {
-            Orientation::Forward | Orientation::Reverse => extract_seq((orient, seq), gfa),
-            Orientation::Star => "".into(),
-        }),
-        "".to_string(),
+    dot_if_empty(
+        Itertools::intersperse(
+            alleles.iter().map(|(orient, seq)| match orient {
+                Orientation::Forward | Orientation::Reverse => extract_seq((orient, seq), gfa),
+                Orientation::Star => "".into(),
+            }),
+            "".to_string(),
+        )
+        .collect::<String>(),
     )
-    .collect::<String>()
 }
 
 fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
@@ -210,7 +219,7 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         let mut record = record?;
         writer.translate(&mut record);
         record.unpack();
-        let record_data = VcfFields::new(&record)?;
+        let record_data = VariantDatum::new(&record)?;
         all_records.push((record, record_data));
     }
     log::info!("Read in data, processing");
@@ -218,7 +227,7 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     // chr1:150411409
     const _TRUE_INSERTION: (i32, i32) = (0, 148_288_482 - 1); //chr1    148288482
     const _TRUE_DELETION: (i32, i32) = (0, 150_411_410 - 1); // chr1    150411410
-    const TRUTH: &[i32] = &[_TRUE_INSERTION.1, _TRUE_DELETION.1];
+    const _TRUTH: &[i32] = &[_TRUE_INSERTION.1, _TRUE_DELETION.1];
     for (record, data) in &mut all_records {
         let vertex_start_str = data.vertex_start();
         log::trace!("Getting vertex start: {vertex_start_str}");
@@ -253,17 +262,17 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             .iter()
             .map(|x| make_seq(&x[..], &gfa))
             .collect::<Vec<_>>();
-        let alens = seqs.iter().map(|x| x.len() as i32).collect::<Vec<_>>();
-        assert_eq!(alens, data.alen);
+        let alens = seqs
+            .iter()
+            .map(|x| if x == "." { 0 } else { x.len() as i32 })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            alens, data.alen,
+            "seqs: {seqs:?}. expected alens: {:?}, found {alens:?}",
+            data.alen
+        );
         let pos = record.pos() as i32;
         let id = String::from_utf8(record.id()).expect("id not utf-8");
-        if TRUTH.contains(&pos) {
-            log::info!(
-                "Walk: {walks:?} yields seqs {:?} for data {data:?} and record {record:?}/{}/{id}",
-                seqs.iter().map(|x| x.len()).collect::<Vec<_>>(),
-                record.desc()
-            );
-        }
         if !seqs.is_empty() {
             let alleles = seqs
                 .iter()
