@@ -84,7 +84,6 @@ pub fn rc(x: &str) -> String {
 #[derive(Debug)]
 struct VariantDatum {
     // "END=373973;AN=7;NS=7;NA=2;ALEN=74,0;AC=2;VS=>s24;VE=>s25;AWALK=>s67628,*"
-    pub end: Option<i32>,
     pub alen: Vec<i32>,
     pub allele_walk: Vec<String>,
     vertex_start: String,
@@ -93,14 +92,14 @@ struct VariantDatum {
 
 impl VariantDatum {
     pub fn new(record: &bcf::Record) -> Result<Self, Box<dyn std::error::Error>> {
-        let end = record.info(b"END"); //("END tag missing");
+        //let end = record.info(b"END"); //("END tag missing");
         let alen = record.info(b"ALEN"); //("ALEN tag missing");
         let awalk = record.info(b"AWALK"); //("AWALK tag missing");
         let vertex_start = record.info(b"VS"); //("VS tag missing");
         let vertex_end = record.info(b"VE"); //("VE tag missing");
 
         let alen = alen.integer()?.map(|x| x.to_owned()).unwrap_or_default();
-        let end = end.integer()?.and_then(|end| end.get(0).copied());
+        //let end = end.integer()?.and_then(|end| end.first().copied());
         let awalk = awalk.string()?;
         let allele_walk = awalk
             .map(|awalk| {
@@ -119,7 +118,7 @@ impl VariantDatum {
         let vertex_end =
             std::str::from_utf8(vertex_end.string()?.expect("VE was not present")[0])?.to_owned();
         Ok(Self {
-            end,
+            //end,
             alen,
             allele_walk,
             vertex_start,
