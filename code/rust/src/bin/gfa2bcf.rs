@@ -246,17 +246,14 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             )
         });
         log::trace!("VE,VS: {vertex_start}, {vertex_end} ({vertex_start_str}, {vertex_end_str})");
-        let walks = data
-            .allele_walk
-            .iter()
-            .map(|x| {
-                if x == "*" {
-                    vec![(Orientation::Star, "*".to_owned())]
-                } else {
-                    gfa::decompose_walk(x)
-                }
+        let mut walks = Vec::new();
+        for walk in &data.allele_walk {
+            walks.push(if walk == "*" {
+                vec![(Orientation::Star, "*".to_owned())]
+            } else {
+                gfa::decompose_walk(walk)?
             })
-            .collect::<Vec<Vec<(Orientation, String)>>>();
+        }
         assert_eq!(walks.len(), data.alen.len());
         let seqs = walks
             .iter()
