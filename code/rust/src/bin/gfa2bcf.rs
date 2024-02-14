@@ -161,7 +161,7 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Read in data, processing");
     for (record, data) in &mut all_records {
         let vertex_start_str = data.vertex_start();
-        log::debug!("Getting vertex start: {vertex_start_str}");
+        log::trace!("Getting vertex start: {vertex_start_str}");
         let vertex_start = gfa.segment_id(&vertex_start_str).unwrap_or_else(|| {
             panic!(
                 "No vertex found for data {data:?} with vs {vertex_start_str}/{:?}",
@@ -169,15 +169,17 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             )
         });
         let vertex_end_str = data.vertex_end();
-        log::debug!("Getting vertex end: {vertex_end_str}");
+        log::trace!("Getting vertex end: {vertex_end_str}");
         let vertex_end = gfa.segment_id(&vertex_end_str).unwrap_or_else(|| {
             panic!(
                 "No vertex found for data {data:?} with ve {:?}",
                 data.vertex_end
             )
         });
-        log::debug!("VE,VS: {vertex_start}, {vertex_end} ({vertex_start_str}, {vertex_end_str})");
+        log::trace!("VE,VS: {vertex_start}, {vertex_end} ({vertex_start_str}, {vertex_end_str})");
     }
+    const _TRUE_INSERTION: (i32, i32) = (0, 148_288_482 - 1); //chr1    148288482
+    const _TRUE_DELETION: (i32, i32) = (0, 150_411_410 - 1); // chr1    150411410
 
     log::info!("Processed, writing out");
     for (record, _data) in &all_records {
