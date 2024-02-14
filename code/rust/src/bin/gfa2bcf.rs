@@ -1,10 +1,11 @@
-use concordance::gfa;
+use concordance::gfa::{self, Orientation};
 
 use clap::Parser;
 use log::LevelFilter;
 use rust_htslib::bcf::{self, Read};
 
 use std::boxed::Box;
+use std::io::Write;
 use std::path::PathBuf;
 
 /// Simple program to greet a person
@@ -62,6 +63,24 @@ impl fmt::Display for VcfRecord {
     }
 }
 */
+
+fn rc(x: &str) -> String {
+    x.chars()
+        .rev()
+        .map(|x| match x {
+            // TODO: lookup table if we feel like it.
+            'A' => 'T',
+            'C' => 'G',
+            'G' => 'C',
+            'T' => 'A',
+            'a' => 't',
+            'c' => 'g',
+            'g' => 'c',
+            't' => 'a',
+            _ => '?',
+        })
+        .collect::<String>()
+}
 
 #[derive(Debug)]
 struct VcfFields {
@@ -126,6 +145,9 @@ impl VcfFields {
     }
 }
 
+#[derive(Debug)]
+struct WalkStep(pub String, pub Orientation);
+
 fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Loading gfa: {:?}.", args.gfa);
     let gfa = gfa::File::from_path(&args.gfa)?;
@@ -158,6 +180,7 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         let record_data = VcfFields::new(&record)?;
         all_records.push((record, record_data));
     }
+    let mut outf = std::io::BufWriter::new(std::fs::File::create("out-data.tsv")?);
     log::info!("Read in data, processing");
     for (record, data) in &mut all_records {
         let vertex_start_str = data.vertex_start();
@@ -177,7 +200,46 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             )
         });
         log::trace!("VE,VS: {vertex_start}, {vertex_end} ({vertex_start_str}, {vertex_end_str})");
+        let walk = data
+            .allele_walk
+            .iter()
+            .map(|x| {
+                WalkStep(
+                    x[1..].to_string(),
+                    Orientation::new(
+                        x.chars()
+                            .next()
+                            .expect("Walk step needs at least one character"),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        log::debug!("Walk: {walk:?} for data {data:?} and record {record:?}");
+        let seqs = walk
+            .iter()
+            .map(|WalkStep(vertex, orientation)| {
+                if vertex.is_empty() {
+                    "*".to_string()
+                } else {
+                    let vtx = gfa
+                        .segment_id(&vertex)
+                        .unwrap_or_else(|| panic!("Missing vertex {vertex}"));
+                    let vtx = &gfa.segments[vtx];
+                    let seq = vtx
+                        .sequence
+                        .as_ref()
+                        .expect("segment for vertex does not have a sequence");
+                    if *orientation == Orientation::Forward {
+                        seq.clone()
+                    } else {
+                        rc(&seq)
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+        writeln!(outf, "{seqs:?}\t{walk:?}\t{data:?}");
     }
+    drop(outf);
     const _TRUE_INSERTION: (i32, i32) = (0, 148_288_482 - 1); //chr1    148288482
     const _TRUE_DELETION: (i32, i32) = (0, 150_411_410 - 1); // chr1    150411410
 
