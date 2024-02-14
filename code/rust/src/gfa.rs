@@ -1,3 +1,4 @@
+use std::borrow::ToOwned;
 use std::boxed::Box;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -105,6 +106,7 @@ impl Line {
     SR	i	Rank. 0 if on a linear reference genome; >0 otherwise
         */
     /// Offset
+    #[must_use]
     pub fn sequence_offset(&self) -> Option<i64> {
         self.tags
             .iter()
@@ -113,6 +115,7 @@ impl Line {
             .and_then(|x| x.parse::<i64>().ok())
     }
     /// Rank
+    #[must_use]
     pub fn sequence_rank(&self) -> Option<i64> {
         self.tags
             .iter()
@@ -121,6 +124,7 @@ impl Line {
             .and_then(|x| x.parse::<i64>().ok())
     }
     /// Sequence Name (target)
+    #[must_use]
     pub fn sequence_name(&self) -> Option<&str> {
         self.tags
             .iter()
@@ -189,7 +193,7 @@ impl std::str::FromStr for Line {
                 let from = Some(
                     toks.next()
                         .ok_or_else(|| Error(format!("Expected from segment id in s {s}")))
-                        .map(|x| x.to_owned())?,
+                        .map(ToOwned::to_owned)?,
                 );
                 let from_orientation = orientation(
                     toks.next()
@@ -198,7 +202,7 @@ impl std::str::FromStr for Line {
                 let to = Some(
                     toks.next()
                         .ok_or_else(|| Error(format!("Expected to segment id in s {s}")))
-                        .map(|x| x.to_owned())?,
+                        .map(ToOwned::to_owned)?,
                 );
                 let to_orientation = orientation(
                     toks.next()
@@ -206,7 +210,7 @@ impl std::str::FromStr for Line {
                 );
                 let cigar = Some(
                     toks.next()
-                        .map(|x| x.to_owned())
+                        .map(ToOwned::to_owned)
                         .ok_or_else(|| Error("Expected cigar".into()))?,
                 );
                 let tags = toks
