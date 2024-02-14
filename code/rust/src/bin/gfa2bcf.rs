@@ -5,7 +5,6 @@ use log::LevelFilter;
 use rust_htslib::bcf::{self, Read};
 
 use std::boxed::Box;
-use std::fmt;
 use std::path::PathBuf;
 
 /// Simple program to greet a person
@@ -14,7 +13,7 @@ use std::path::PathBuf;
 struct Args {
     #[clap(help = "Path to input gfa")]
     gfa: PathBuf,
-    #[arg(short = 'V', long, help = "Input {b,v}cf path")]
+    #[arg(help = "Input {b,v}cf path")]
     vcf: PathBuf,
     #[arg(short, long, help = "Output bcf path")]
     bcf: Option<PathBuf>,
@@ -64,13 +63,14 @@ impl fmt::Display for VcfRecord {
 }
 */
 
+#[derive(Debug)]
 struct VcfFields {
     // "END=373973;AN=7;NS=7;NA=2;ALEN=74,0;AC=2;VS=>s24;VE=>s25;AWALK=>s67628,*"
     pub end: Option<i32>,
     pub alen: Vec<i32>,
     pub allele_walk: Vec<String>,
-    pub vertex_start: String,
-    pub vertex_end: String,
+    vertex_start: String,
+    vertex_end: String,
 }
 
 impl VcfFields {
@@ -108,6 +108,22 @@ impl VcfFields {
             vertex_end,
         })
     }
+
+    /// Get id for vertex for start.
+    /// Trims the leading '>' character.
+    /// If no '>' is present, uses the string directly.
+    pub fn vertex_start(&self) -> &str {
+        let start = usize::from(self.vertex_start.starts_with('>'));
+        &self.vertex_start[start..]
+    }
+
+    /// Get id for vertex for end.
+    /// Trims the leading '>' character.
+    /// If no '>' is present, uses the string directly.
+    pub fn vertex_end(&self) -> &str {
+        let start = usize::from(self.vertex_end.starts_with('>'));
+        &self.vertex_end[start..]
+    }
 }
 
 fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
@@ -144,9 +160,23 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     }
     log::info!("Read in data, processing");
     for (record, data) in &mut all_records {
-        let vertex_start = gfa.segment_id(&data.vertex_start).expect("No VS");
-        let vertex_end = gfa.segment_id(&data.vertex_end).expect("No VE");
-        log::debug!("VE,VS: {vertex_start}, {vertex_end}");
+        let vertex_start_str = data.vertex_start();
+        log::debug!("Getting vertex start: {vertex_start_str}");
+        let vertex_start = gfa.segment_id(&vertex_start_str).unwrap_or_else(|| {
+            panic!(
+                "No vertex found for data {data:?} with vs {vertex_start_str}/{:?}",
+                data.vertex_start
+            )
+        });
+        let vertex_end_str = data.vertex_end();
+        log::debug!("Getting vertex end: {vertex_end_str}");
+        let vertex_end = gfa.segment_id(&vertex_end_str).unwrap_or_else(|| {
+            panic!(
+                "No vertex found for data {data:?} with ve {:?}",
+                data.vertex_end
+            )
+        });
+        log::debug!("VE,VS: {vertex_start}, {vertex_end} ({vertex_start_str}, {vertex_end_str})");
     }
 
     log::info!("Processed, writing out");

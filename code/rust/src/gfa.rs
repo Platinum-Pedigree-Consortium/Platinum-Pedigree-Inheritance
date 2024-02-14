@@ -334,8 +334,8 @@ impl File {
         ))
     }
 
-    pub fn segment_id(&self, name: &String) -> Option<usize> {
-        self.name2idx.get(name).copied()
+    pub fn segment_id(&self, name: impl AsRef<str>) -> Option<usize> {
+        self.name2idx.get(name.as_ref()).copied()
     }
 }
 
