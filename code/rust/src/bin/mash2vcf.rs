@@ -95,8 +95,8 @@ fn main() {
     header.push_str("##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n");
     header.push_str("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t");
 
-    let samples: Vec<String> = args.samples.split(",").map(str::to_string).collect();
-    let inputkeys: Vec<String> = args.ik.split(",").map(str::to_string).collect();
+    let samples: Vec<String> = args.samples.split(',').map(str::to_string).collect();
+    let inputkeys: Vec<String> = args.ik.split(',').map(str::to_string).collect();
 
     upset_r
         .write(b"site\t")
@@ -109,16 +109,16 @@ fn main() {
     upset_r.write(b"\n").expect("Issue writing to upsetr file");
 
     header.push_str(&samples.join("\t"));
-    header.push_str("\n");
+    header.push('\n');
     vcf.write(header.as_bytes()).expect("Failure to write vcf");
 
     for line in read_to_string(args.mashed).unwrap().lines() {
         let fields: Vec<String> = line.split_whitespace().map(str::to_string).collect();
-        let geno: Vec<String> = fields[1].split(",").map(str::to_string).collect();
+        let geno: Vec<String> = fields[1].split(',').map(str::to_string).collect();
         let mut sources: Vec<String> = fields
             .last()
             .unwrap()
-            .split(",")
+            .split(',')
             .map(str::to_string)
             .collect();
         sources.sort();
@@ -154,7 +154,7 @@ fn main() {
         }
         passed_sites += 1;
 
-        let pos_allele: Vec<String> = fields[0].split(":").map(str::to_string).collect();
+        let pos_allele: Vec<String> = fields[0].split(':').map(str::to_string).collect();
 
         let mut record_type = "SNV".to_string();
         if pos_allele[3].len() > 1 || pos_allele[4].len() > 1 {
@@ -176,7 +176,7 @@ fn main() {
                 sources.len()
             ),
             format: "GT".to_string(),
-            genotypes: fg.split(":").map(str::to_string).collect(),
+            genotypes: fg.split(':').map(str::to_string).collect(),
         };
         record.genotypes.pop();
 

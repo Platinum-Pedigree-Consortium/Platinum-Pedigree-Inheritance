@@ -154,7 +154,7 @@ fn extract_seq(input: (&Orientation, &String), gfa: &gfa::File) -> String {
         return "".into();
     }
     let vtx = gfa
-        .segment_id(&vertex)
+        .segment_id(vertex)
         .unwrap_or_else(|| panic!("Missing vertex {vertex}"));
     let vtx = &gfa.segments[vtx];
     let seq = vtx
@@ -164,7 +164,7 @@ fn extract_seq(input: (&Orientation, &String), gfa: &gfa::File) -> String {
     if *orient == Orientation::Forward {
         seq.clone()
     } else {
-        rc(&seq)
+        rc(seq)
     }
 }
 
@@ -211,7 +211,7 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         .bcf
         .as_ref()
         .map_or("-".to_string(), |x| x.display().to_string());
-    let mut writer = bcf::Writer::from_path(&bcf, &header, args.uncompressed, bcf::Format::Bcf)?;
+    let mut writer = bcf::Writer::from_path(bcf, &header, args.uncompressed, bcf::Format::Bcf)?;
     log::info!("Opened handles; reading in data.");
     let mut all_records = Vec::new();
     //let mut reader = bcf::Reader::from_path(&args.vcf)?;
@@ -231,7 +231,7 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     for (record, data) in &mut all_records {
         let vertex_start_str = data.vertex_start();
         log::trace!("Getting vertex start: {vertex_start_str}");
-        let vertex_start = gfa.segment_id(&vertex_start_str).unwrap_or_else(|| {
+        let vertex_start = gfa.segment_id(vertex_start_str).unwrap_or_else(|| {
             panic!(
                 "No vertex found for data {data:?} with vs {vertex_start_str}/{:?}",
                 data.vertex_start
@@ -239,7 +239,7 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         });
         let vertex_end_str = data.vertex_end();
         log::trace!("Getting vertex end: {vertex_end_str}");
-        let vertex_end = gfa.segment_id(&vertex_end_str).unwrap_or_else(|| {
+        let vertex_end = gfa.segment_id(vertex_end_str).unwrap_or_else(|| {
             panic!(
                 "No vertex found for data {data:?} with ve {:?}",
                 data.vertex_end
@@ -292,10 +292,7 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         };
         record.set_id(id.as_bytes())?;
         if !seqs.is_empty() {
-            let alleles = seqs
-                .iter()
-                .map(|x| &x.as_bytes()[..])
-                .collect::<Vec<&[u8]>>();
+            let alleles = seqs.iter().map(|x| x.as_bytes()).collect::<Vec<&[u8]>>();
             record.set_alleles(&alleles[..])?;
         }
     }
