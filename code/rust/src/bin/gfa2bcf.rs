@@ -6,7 +6,6 @@ use log::LevelFilter;
 use rust_htslib::bcf::{self, Read};
 
 use std::boxed::Box;
-use std::io::Write;
 use std::path::PathBuf;
 
 /// Simple program to greet a person
@@ -206,6 +205,8 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Opening vcf: {:?}.", args.vcf);
     let mut reader = bcf::Reader::from_path(&args.vcf)?;
     let header = bcf::Header::from_template(reader.header()); // TODO: add new header info potentially. Maybe auto-handle missing vcf fields.
+    let reader_for_header = bcf::Reader::from_path(&args.vcf)?;
+    let header_view = reader_for_header.header();
 
     let bcf = args
         .bcf
@@ -271,8 +272,26 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             "seqs: {seqs:?}. expected alens: {:?}, found {alens:?}",
             data.alen
         );
-        let pos = record.pos() as i32;
         let id = String::from_utf8(record.id()).expect("id not utf-8");
+        let id = if id == "." {
+            let length_str =
+                Itertools::intersperse(alens.iter().map(|x| x.to_string()), ",".to_string())
+                    .collect::<String>();
+            format!(
+                "{}:{}:{length_str}",
+                record
+                    .rid()
+                    .and_then(|x| header_view.rid2name(x).ok())
+                    .map_or(record.rid().map_or("*".into(), |x| x.to_string()), |x| {
+                        String::from_utf8(x.to_owned())
+                            .expect("Failed to utf-8 encode a reference name")
+                    }),
+                record.pos()
+            )
+        } else {
+            id
+        };
+        record.set_id(id.as_bytes())?;
         if !seqs.is_empty() {
             let alleles = seqs
                 .iter()
