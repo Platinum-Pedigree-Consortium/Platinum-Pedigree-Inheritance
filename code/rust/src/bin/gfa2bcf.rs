@@ -6,7 +6,6 @@ use log::LevelFilter;
 use rust_htslib::bcf::{self, Read};
 
 use std::boxed::Box;
-use std::io::Write;
 use std::path::PathBuf;
 
 /// Simple program to greet a person
@@ -83,25 +82,24 @@ pub fn rc(x: &str) -> String {
 }
 
 #[derive(Debug)]
-struct VcfFields {
+struct VariantDatum {
     // "END=373973;AN=7;NS=7;NA=2;ALEN=74,0;AC=2;VS=>s24;VE=>s25;AWALK=>s67628,*"
-    pub end: Option<i32>,
     pub alen: Vec<i32>,
     pub allele_walk: Vec<String>,
     vertex_start: String,
     vertex_end: String,
 }
 
-impl VcfFields {
+impl VariantDatum {
     pub fn new(record: &bcf::Record) -> Result<Self, Box<dyn std::error::Error>> {
-        let end = record.info(b"END"); //("END tag missing");
+        //let end = record.info(b"END"); //("END tag missing");
         let alen = record.info(b"ALEN"); //("ALEN tag missing");
         let awalk = record.info(b"AWALK"); //("AWALK tag missing");
         let vertex_start = record.info(b"VS"); //("VS tag missing");
         let vertex_end = record.info(b"VE"); //("VE tag missing");
 
         let alen = alen.integer()?.map(|x| x.to_owned()).unwrap_or_default();
-        let end = end.integer()?.and_then(|end| end.get(0).copied());
+        //let end = end.integer()?.and_then(|end| end.first().copied());
         let awalk = awalk.string()?;
         let allele_walk = awalk
             .map(|awalk| {
@@ -120,7 +118,7 @@ impl VcfFields {
         let vertex_end =
             std::str::from_utf8(vertex_end.string()?.expect("VE was not present")[0])?.to_owned();
         Ok(Self {
-            end,
+            //end,
             alen,
             allele_walk,
             vertex_start,
@@ -156,7 +154,7 @@ fn extract_seq(input: (&Orientation, &String), gfa: &gfa::File) -> String {
         return "".into();
     }
     let vtx = gfa
-        .segment_id(&vertex)
+        .segment_id(vertex)
         .unwrap_or_else(|| panic!("Missing vertex {vertex}"));
     let vtx = &gfa.segments[vtx];
     let seq = vtx
@@ -166,19 +164,28 @@ fn extract_seq(input: (&Orientation, &String), gfa: &gfa::File) -> String {
     if *orient == Orientation::Forward {
         seq.clone()
     } else {
-        rc(&seq)
+        rc(seq)
     }
 }
 
+fn dot_if_empty(mut x: String) -> String {
+    if x.is_empty() {
+        x.push('.');
+    }
+    x
+}
+
 fn make_seq(alleles: &[(Orientation, String)], gfa: &gfa::File) -> String {
-    Itertools::intersperse(
-        alleles.iter().map(|(orient, seq)| match orient {
-            Orientation::Forward | Orientation::Reverse => extract_seq((orient, seq), gfa),
-            Orientation::Star => "".into(),
-        }),
-        "".to_string(),
+    dot_if_empty(
+        Itertools::intersperse(
+            alleles.iter().map(|(orient, seq)| match orient {
+                Orientation::Forward | Orientation::Reverse => extract_seq((orient, seq), gfa),
+                Orientation::Star => "".into(),
+            }),
+            "".to_string(),
+        )
+        .collect::<String>(),
     )
-    .collect::<String>()
 }
 
 fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
@@ -197,12 +204,14 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Opening vcf: {:?}.", args.vcf);
     let mut reader = bcf::Reader::from_path(&args.vcf)?;
     let header = bcf::Header::from_template(reader.header()); // TODO: add new header info potentially. Maybe auto-handle missing vcf fields.
+    let reader_for_header = bcf::Reader::from_path(&args.vcf)?;
+    let header_view = reader_for_header.header();
 
     let bcf = args
         .bcf
         .as_ref()
         .map_or("-".to_string(), |x| x.display().to_string());
-    let mut writer = bcf::Writer::from_path(&bcf, &header, args.uncompressed, bcf::Format::Bcf)?;
+    let mut writer = bcf::Writer::from_path(bcf, &header, args.uncompressed, bcf::Format::Bcf)?;
     log::info!("Opened handles; reading in data.");
     let mut all_records = Vec::new();
     //let mut reader = bcf::Reader::from_path(&args.vcf)?;
@@ -210,7 +219,7 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         let mut record = record?;
         writer.translate(&mut record);
         record.unpack();
-        let record_data = VcfFields::new(&record)?;
+        let record_data = VariantDatum::new(&record)?;
         all_records.push((record, record_data));
     }
     log::info!("Read in data, processing");
@@ -218,11 +227,11 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     // chr1:150411409
     const _TRUE_INSERTION: (i32, i32) = (0, 148_288_482 - 1); //chr1    148288482
     const _TRUE_DELETION: (i32, i32) = (0, 150_411_410 - 1); // chr1    150411410
-    const TRUTH: &[i32] = &[_TRUE_INSERTION.1, _TRUE_DELETION.1];
+    const _TRUTH: &[i32] = &[_TRUE_INSERTION.1, _TRUE_DELETION.1];
     for (record, data) in &mut all_records {
         let vertex_start_str = data.vertex_start();
         log::trace!("Getting vertex start: {vertex_start_str}");
-        let vertex_start = gfa.segment_id(&vertex_start_str).unwrap_or_else(|| {
+        let vertex_start = gfa.segment_id(vertex_start_str).unwrap_or_else(|| {
             panic!(
                 "No vertex found for data {data:?} with vs {vertex_start_str}/{:?}",
                 data.vertex_start
@@ -230,45 +239,57 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         });
         let vertex_end_str = data.vertex_end();
         log::trace!("Getting vertex end: {vertex_end_str}");
-        let vertex_end = gfa.segment_id(&vertex_end_str).unwrap_or_else(|| {
+        let vertex_end = gfa.segment_id(vertex_end_str).unwrap_or_else(|| {
             panic!(
                 "No vertex found for data {data:?} with ve {:?}",
                 data.vertex_end
             )
         });
         log::trace!("VE,VS: {vertex_start}, {vertex_end} ({vertex_start_str}, {vertex_end_str})");
-        let walks = data
-            .allele_walk
-            .iter()
-            .map(|x| {
-                if x == "*" {
-                    vec![(Orientation::Star, "*".to_owned())]
-                } else {
-                    gfa::decompose_walk(x)
-                }
+        let mut walks = Vec::new();
+        for walk in &data.allele_walk {
+            walks.push(if walk == "*" {
+                vec![(Orientation::Star, "*".to_owned())]
+            } else {
+                gfa::decompose_walk(walk)?
             })
-            .collect::<Vec<Vec<(Orientation, String)>>>();
+        }
         assert_eq!(walks.len(), data.alen.len());
         let seqs = walks
             .iter()
             .map(|x| make_seq(&x[..], &gfa))
             .collect::<Vec<_>>();
-        let alens = seqs.iter().map(|x| x.len() as i32).collect::<Vec<_>>();
-        assert_eq!(alens, data.alen);
-        let pos = record.pos() as i32;
+        let alens = seqs
+            .iter()
+            .map(|x| if x == "." { 0 } else { x.len() as i32 })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            alens, data.alen,
+            "seqs: {seqs:?}. expected alens: {:?}, found {alens:?}",
+            data.alen
+        );
         let id = String::from_utf8(record.id()).expect("id not utf-8");
-        if TRUTH.contains(&pos) {
-            log::info!(
-                "Walk: {walks:?} yields seqs {:?} for data {data:?} and record {record:?}/{}/{id}",
-                seqs.iter().map(|x| x.len()).collect::<Vec<_>>(),
-                record.desc()
-            );
-        }
+        let id = if id == "." {
+            let length_str =
+                Itertools::intersperse(alens.iter().map(|x| x.to_string()), ",".to_string())
+                    .collect::<String>();
+            format!(
+                "{}:{}:{length_str}",
+                record
+                    .rid()
+                    .and_then(|x| header_view.rid2name(x).ok())
+                    .map_or(record.rid().map_or("*".into(), |x| x.to_string()), |x| {
+                        String::from_utf8(x.to_owned())
+                            .expect("Failed to utf-8 encode a reference name")
+                    }),
+                record.pos()
+            )
+        } else {
+            id
+        };
+        record.set_id(id.as_bytes())?;
         if !seqs.is_empty() {
-            let alleles = seqs
-                .iter()
-                .map(|x| &x.as_bytes()[..])
-                .collect::<Vec<&[u8]>>();
+            let alleles = seqs.iter().map(|x| x.as_bytes()).collect::<Vec<&[u8]>>();
             record.set_alleles(&alleles[..])?;
         }
     }

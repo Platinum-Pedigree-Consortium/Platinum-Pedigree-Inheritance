@@ -1,3 +1,4 @@
+use std::borrow::ToOwned;
 use std::boxed::Box;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -15,6 +16,8 @@ impl std::default::Default for Category {
         Self::Segment
     }
 }
+
+pub type DError = Box<dyn std::error::Error>;
 
 impl std::fmt::Display for Category {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -75,6 +78,10 @@ pub struct Line {
 }
 
 impl Line {
+    /// get name for item.
+    /// # Panics
+    /// Panics if from/to are not present, name is also not present.
+    /// This should never happen, as either name or from/to should be present at creation.
     #[must_use]
     pub fn name(&self) -> String {
         if let Some(name) = &self.name {
@@ -99,6 +106,7 @@ impl Line {
     SR	i	Rank. 0 if on a linear reference genome; >0 otherwise
         */
     /// Offset
+    #[must_use]
     pub fn sequence_offset(&self) -> Option<i64> {
         self.tags
             .iter()
@@ -107,6 +115,7 @@ impl Line {
             .and_then(|x| x.parse::<i64>().ok())
     }
     /// Rank
+    #[must_use]
     pub fn sequence_rank(&self) -> Option<i64> {
         self.tags
             .iter()
@@ -115,6 +124,7 @@ impl Line {
             .and_then(|x| x.parse::<i64>().ok())
     }
     /// Sequence Name (target)
+    #[must_use]
     pub fn sequence_name(&self) -> Option<&str> {
         self.tags
             .iter()
@@ -183,7 +193,7 @@ impl std::str::FromStr for Line {
                 let from = Some(
                     toks.next()
                         .ok_or_else(|| Error(format!("Expected from segment id in s {s}")))
-                        .map(|x| x.to_owned())?,
+                        .map(ToOwned::to_owned)?,
                 );
                 let from_orientation = orientation(
                     toks.next()
@@ -192,7 +202,7 @@ impl std::str::FromStr for Line {
                 let to = Some(
                     toks.next()
                         .ok_or_else(|| Error(format!("Expected to segment id in s {s}")))
-                        .map(|x| x.to_owned())?,
+                        .map(ToOwned::to_owned)?,
                 );
                 let to_orientation = orientation(
                     toks.next()
@@ -200,7 +210,7 @@ impl std::str::FromStr for Line {
                 );
                 let cigar = Some(
                     toks.next()
-                        .map(|x| x.to_owned())
+                        .map(ToOwned::to_owned)
                         .ok_or_else(|| Error("Expected cigar".into()))?,
                 );
                 let tags = toks
@@ -404,17 +414,20 @@ impl Orientation {
 /// assert_eq!(result[0].1, "s1000");
 /// assert_eq!(result[1].1, "s3000");
 ///```
-pub fn decompose_walk(walk: &str) -> Vec<(Orientation, String)> {
-    use regex::Regex;
-    let regex = Regex::new(r"([<>])s([0-9]+)").expect("Failed to compile regex");
-    regex
-        .captures_iter(walk)
-        .map(|x| x.extract())
-        .map(|(_match, [orient, segment_id])| {
-            (
-                Orientation::new(orient.chars().next().expect("No orientation characters")),
-                format!("s{segment_id}"),
-            )
-        })
-        .collect::<Vec<_>>()
+pub fn decompose_walk(walk: &str) -> Result<Vec<(Orientation, String)>, DError> {
+    let regex = regex::Regex::new(r"([<>])s([0-9]+)")?;
+    let mut ret = Vec::new();
+    for (_match, [orient, segment_id]) in regex.captures_iter(walk).map(|x| x.extract()) {
+        let entry = (
+            Orientation::new(
+                orient
+                    .chars()
+                    .next()
+                    .ok_or(Error("No orientation characters".into()))?,
+            ),
+            format!("s{segment_id}"),
+        );
+        ret.push(entry);
+    }
+    Ok(ret)
 }
