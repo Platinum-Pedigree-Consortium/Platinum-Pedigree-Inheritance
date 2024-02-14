@@ -323,7 +323,6 @@ impl File {
     /// Returns all excident edges for a given segment id.
     /// # Panics
     /// Panics if start > end, which can never happen in software as `0 < usize::MAX`.
-    #[must_use]
     pub fn out_edges(
         &self,
         idx: usize,
