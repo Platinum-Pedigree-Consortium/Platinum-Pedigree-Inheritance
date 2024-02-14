@@ -1,6 +1,7 @@
 use concordance::gfa::{self, Orientation};
 
 use clap::Parser;
+use itertools::Itertools;
 use log::LevelFilter;
 use rust_htslib::bcf::{self, Read};
 
@@ -64,11 +65,10 @@ impl fmt::Display for VcfRecord {
 }
 */
 
-fn rc(x: &str) -> String {
+pub fn rc(x: &str) -> String {
     x.chars()
         .rev()
         .map(|x| match x {
-            // TODO: lookup table if we feel like it.
             'A' => 'T',
             'C' => 'G',
             'G' => 'C',
@@ -150,6 +150,37 @@ impl VcfFields {
 struct WalkStep(pub String, pub Orientation);
 */
 
+fn extract_seq(input: (&Orientation, &String), gfa: &gfa::File) -> String {
+    let (orient, vertex) = input;
+    if vertex == "*" {
+        return "".into();
+    }
+    let vtx = gfa
+        .segment_id(&vertex)
+        .unwrap_or_else(|| panic!("Missing vertex {vertex}"));
+    let vtx = &gfa.segments[vtx];
+    let seq = vtx
+        .sequence
+        .as_ref()
+        .expect("segment for vertex does not have a sequence");
+    if *orient == Orientation::Forward {
+        seq.clone()
+    } else {
+        rc(&seq)
+    }
+}
+
+fn make_seq(alleles: &[(Orientation, String)], gfa: &gfa::File) -> String {
+    Itertools::intersperse(
+        alleles.iter().map(|(orient, seq)| match orient {
+            Orientation::Forward | Orientation::Reverse => extract_seq((orient, seq), gfa),
+            Orientation::Star => "".into(),
+        }),
+        "".to_string(),
+    )
+    .collect::<String>()
+}
+
 fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Loading gfa: {:?}.", args.gfa);
     let gfa = gfa::File::from_path(&args.gfa)?;
@@ -217,7 +248,14 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                     gfa::decompose_walk(x)
                 }
             })
+            .collect::<Vec<Vec<(Orientation, String)>>>();
+        let seqs = walks
+            .iter()
+            .map(|x| make_seq(&x[..], &gfa))
             .collect::<Vec<_>>();
+        let alens = seqs.iter().map(|x| x.len() as i32).collect::<Vec<_>>();
+        assert_eq!(alens, data.alen);
+        /*
         let seqs = walks
             .iter()
             .map(|walk| {
@@ -248,7 +286,6 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             "Walk: {walks:?} yields seqs {:?} for data {data:?} and record {record:?}",
             seqs.iter().map(|x| x.len()).collect::<Vec<_>>()
         );
-        /*
         let seqs = walk
             .iter()
             .map(|WalkStep(vertex, orientation)| {
@@ -271,8 +308,8 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                 }
             })
             .collect::<Vec<_>>();
-        */
         writeln!(outf, "{seqs:?}\t{walks:?}\t{data:?}")?;
+        */
         let pos = record.pos() as i32;
         let id = String::from_utf8(record.id()).expect("id not utf-8");
         if TRUTH.contains(&pos) {
