@@ -93,6 +93,34 @@ impl Line {
     fn to(&self) -> Option<&String> {
         self.to.as_ref()
     }
+    /*
+    SN	Z	Name of stable sequence from which the segment is derived
+    SO	i	Offset on the stable sequence
+    SR	i	Rank. 0 if on a linear reference genome; >0 otherwise
+        */
+    /// Offset
+    pub fn sequence_offset(&self) -> Option<i64> {
+        self.tags
+            .iter()
+            .find(|x| x.starts_with("SO"))
+            .and_then(|x| x.split_terminator(':').nth(2))
+            .and_then(|x| x.parse::<i64>().ok())
+    }
+    /// Rank
+    pub fn sequence_rank(&self) -> Option<i64> {
+        self.tags
+            .iter()
+            .find(|x| x.starts_with("SR"))
+            .and_then(|x| x.split_terminator(':').nth(2))
+            .and_then(|x| x.parse::<i64>().ok())
+    }
+    /// Sequence Name (target)
+    pub fn sequence_name(&self) -> Option<&str> {
+        self.tags
+            .iter()
+            .find(|x| x.starts_with("SN"))
+            .and_then(|x| x.split_terminator(':').nth(2))
+    }
 }
 
 /// Store orientation as a bool. True = forward strand.
@@ -347,4 +375,46 @@ impl std::fmt::Display for File {
             self.links.len()
         )
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Orientation {
+    Forward, // '>'
+    Reverse, // '<'
+    Star,    // '*" - what does it mean?
+}
+
+impl Orientation {
+    pub fn new(x: char) -> Self {
+        match x {
+            '>' => Self::Forward,
+            '<' => Self::Reverse,
+            '*' => Self::Star,
+            _ => {
+                panic!("Unexpected orientation: {x}");
+            }
+        }
+    }
+}
+
+///
+///```
+/// use concordance::gfa::decompose_walk;
+/// let result = decompose_walk(">s1000<s3000");
+/// assert_eq!(result[0].1, "s1000");
+/// assert_eq!(result[1].1, "s3000");
+///```
+pub fn decompose_walk(walk: &str) -> Vec<(Orientation, String)> {
+    use regex::Regex;
+    let regex = Regex::new(r"([<>])s([0-9]+)").expect("Failed to compile regex");
+    regex
+        .captures_iter(walk)
+        .map(|x| x.extract())
+        .map(|(_match, [orient, segment_id])| {
+            (
+                Orientation::new(orient.chars().next().expect("No orientation characters")),
+                format!("s{segment_id}"),
+            )
+        })
+        .collect::<Vec<_>>()
 }
