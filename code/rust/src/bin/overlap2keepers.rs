@@ -164,13 +164,13 @@ fn main() {
     }
 
     varriant_anno_fh
-        .write(
+        .write_all(
             serde_json::to_string_pretty(&variant_anno)
                 .unwrap()
                 .as_bytes(),
         )
         .expect("Failure to write variant json");
     varriant_anno_fh
-        .write("\n".as_bytes())
+        .write_all("\n".as_bytes())
         .expect("Failure to write to variant json");
 }
