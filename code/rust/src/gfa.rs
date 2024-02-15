@@ -289,6 +289,9 @@ impl std::fmt::Display for Line {
     }
 }
 
+/// Representation of an rGFA file. See spec at `https://github.com/lh3/gfatools/blob/master/doc/rGFA.md`.
+/// This is a GFA subset of only `L` and `S` items.
+///
 /// Holds segments + links + edges.
 /// Look up the numeric id for a segment with `name2idx`.
 /// Find excident edges in `edges` using a `BTreeMap` range query.
@@ -387,11 +390,11 @@ impl std::fmt::Display for File {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Copy)]
 pub enum Orientation {
     Forward, // '>'
     Reverse, // '<'
-    Star,    // '*" - what does it mean?
+    Star,    // '*' -- this means no segment.
 }
 
 impl Orientation {
