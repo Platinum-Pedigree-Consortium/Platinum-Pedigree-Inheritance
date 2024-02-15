@@ -219,9 +219,9 @@ impl std::str::FromStr for Line {
                 Ok(Self {
                     category,
                     tags,
-                    cigar,
                     from,
                     to,
+                    cigar,
                     from_orientation,
                     to_orientation,
                     ..Default::default()
@@ -289,6 +289,9 @@ impl std::fmt::Display for Line {
     }
 }
 
+/// Representation of an rGFA file. See spec at `https://github.com/lh3/gfatools/blob/master/doc/rGFA.md`.
+/// This is a GFA subset of only `L` and `S` items.
+///
 /// Holds segments + links + edges.
 /// Look up the numeric id for a segment with `name2idx`.
 /// Find excident edges in `edges` using a `BTreeMap` range query.
@@ -387,14 +390,17 @@ impl std::fmt::Display for File {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Copy)]
 pub enum Orientation {
     Forward, // '>'
     Reverse, // '<'
-    Star,    // '*" - what does it mean?
+    Star,    // '*' -- this means no segment.
 }
 
 impl Orientation {
+    /// Make Orientation from character.
+    /// # Panics
+    /// Panics if char is not in expected set "<>*".
     pub fn new(x: char) -> Self {
         match x {
             '>' => Self::Forward,
@@ -414,6 +420,10 @@ impl Orientation {
 /// assert_eq!(result[0].1, "s1000");
 /// assert_eq!(result[1].1, "s3000");
 ///```
+/// # Errors
+/// 1. Regex failure.
+/// 2. Mal-formatted walk tag.
+///
 pub fn decompose_walk(walk: &str) -> Result<Vec<(Orientation, String)>, DError> {
     let regex = regex::Regex::new(r"([<>])s([0-9]+)")?;
     let mut ret = Vec::new();

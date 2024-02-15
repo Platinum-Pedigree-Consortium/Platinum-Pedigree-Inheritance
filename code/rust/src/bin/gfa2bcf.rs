@@ -187,13 +187,26 @@ fn make_seq(alleles: &[(Orientation, String)], gfa: &gfa::File) -> String {
     )
 }
 
-fn id_from_alens(alens: &[i32]) -> &'static str {
+fn id_from_alens(alens: &[i32], walks: &[Vec<(Orientation, String)>]) -> &'static str {
     if alens.len() <= 1 {
         "."
     } else if alens[0] == 0 && alens[1..].iter().all(|x| *x > 0) {
         "INS"
     } else if alens[0] > 0 && alens[1..].iter().all(|x| *x == 0) {
         "DEL"
+    } else if alens.len() == 2
+        && alens[0] == alens[1]
+        && *alens.iter().max().unwrap() > 0
+        && walks.iter().all(|x| x.len() == 1)
+        && walks.iter().map(|x| &x[0].1).unique().count() == 1
+    {
+        assert_eq!(
+            walks.iter().map(|x| x[0].0).unique().count(),
+            2,
+            "Make sure that the two identical walks are used in opposite orientations. Walks: {walks:?}"
+        );
+        // If the same walk is used in both alleles, then
+        "INV"
     } else {
         "."
     }
@@ -215,8 +228,6 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Opening vcf: {:?}.", args.vcf);
     let mut reader = bcf::Reader::from_path(&args.vcf)?;
     let header = bcf::Header::from_template(reader.header()); // TODO: add new header info potentially. Maybe auto-handle missing vcf fields.
-    let reader_for_header = bcf::Reader::from_path(&args.vcf)?;
-    let header_view = reader_for_header.header();
 
     let use_bcf = args
         .output
@@ -302,27 +313,17 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             "seqs: {seqs:?}. expected alens: {:?}, found {alens:?}",
             data.alen
         );
-        let id = String::from_utf8(record.id()).expect("id not utf-8");
-        let id = if id == "." {
+        let pos = record.pos();
+        let mut id = String::from_utf8(record.id()).expect("id not utf-8");
+        if id == "." {
             let length_str =
                 Itertools::intersperse(alens.iter().map(|x| x.to_string()), ",".to_string())
                     .collect::<String>();
-            format!(
-                "{}:{}:{length_str}",
-                record
-                    .rid()
-                    .and_then(|x| header_view.rid2name(x).ok())
-                    .map_or(record.rid().map_or("*".into(), |x| x.to_string()), |x| {
-                        String::from_utf8(x.to_owned())
-                            .expect("Failed to utf-8 encode a reference name")
-                    }),
-                record.pos()
-            )
-        } else {
-            id
-        };
-        let orig_genotypes = format!("{:?}", record.genotypes());
-        let id = format!("{id}:{}", id_from_alens(&alens));
+            id = length_str;
+        }
+        let orig_genotypes = format!("{:?}", record.genotypes()?);
+        let orig_genotypes = orig_genotypes.split_terminator("Buffer").next().unwrap();
+        let id = format!("{}:{id}:{pos}", id_from_alens(&alens, &walks));
         record.set_id(id.as_bytes())?;
         if !seqs.is_empty() {
             let mut alleles: Vec<&[u8]> = vec![b"N"];
@@ -331,7 +332,8 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             }
             record.set_alleles(&alleles[..])?;
         }
-        let final_genotypes = format!("{:?}", record.genotypes());
+        let final_genotypes = format!("{:?}", record.genotypes()?);
+        let final_genotypes = final_genotypes.split_terminator("Buffer").next().unwrap();
         assert_eq!(
             final_genotypes, orig_genotypes,
             "Old geno: {orig_genotypes}. Now geno: {final_genotypes}"
