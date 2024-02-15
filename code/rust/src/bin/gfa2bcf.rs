@@ -187,6 +187,18 @@ fn make_seq(alleles: &[(Orientation, String)], gfa: &gfa::File) -> String {
     )
 }
 
+fn id_from_alens(alens: &[i32]) -> &'static str {
+    if alens.len() <= 1 {
+        "."
+    } else if alens[0] == 0 && alens[1..].iter().all(|x| *x > 0) {
+        "INS"
+    } else if alens[0] > 0 && alens[1..].iter().all(|x| *x == 0) {
+        "DEL"
+    } else {
+        "."
+    }
+}
+
 fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Loading gfa: {:?}.", args.gfa);
     let gfa = gfa::File::from_path(&args.gfa)?;
@@ -309,6 +321,7 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         } else {
             id
         };
+        let id = format!("{id}:{}", id_from_alens(&alens));
         record.set_id(id.as_bytes())?;
         if !seqs.is_empty() {
             let alleles = seqs.iter().map(|x| x.as_bytes()).collect::<Vec<&[u8]>>();
