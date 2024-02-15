@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<Session genome="hg38" locus="chr1:16655119-16655159" version="8">
+    <Resources>
+        <Resource index="http://web/~zkronenberg/palladium/denovo/NA12879.GRCh38.haplotagged.bam.bai" path="http://web/~zkronenberg/palladium/denovo/NA12879.GRCh38.haplotagged.bam" type="bam"/>
+        <Resource index="http://web/~zkronenberg/palladium/denovo/NA12877.GRCh38.haplotagged.bam.bai" path="http://web/~zkronenberg/palladium/denovo/NA12877.GRCh38.haplotagged.bam" type="bam"/>
+        <Resource index="http://web/~zkronenberg/palladium/denovo/NA12878.GRCh38.haplotagged.bam.bai" path="http://web/~zkronenberg/palladium/denovo/NA12878.GRCh38.haplotagged.bam" type="bam"/>
+        <Resource index="http://web/~dbaker/palladium/NA12887.GRCh38.haplotagged.bam.bai" path="http://web/~dbaker/palladium/NA12887.GRCh38.haplotagged.bam" type="bam"/>
+    </Resources>
+    <Panel height="509" name="Panel1701903538754" width="1903">
+        <Track attributeKey="NA12878.GRCh38.haplotagged.bam Coverage" autoScale="true" clazz="org.broad.igv.sam.CoverageTrack" fontSize="10" id="http://web/~zkronenberg/palladium/denovo/NA12878.GRCh38.haplotagged.bam_coverage" name="NA12878.GRCh38.haplotagged.bam Coverage" snpThreshold="0.2" visible="true">
+            <DataRange baseline="0.0" drawBaseline="true" flipAxis="false" maximum="412.0" minimum="0.0" type="LINEAR"/>
+        </Track>
+        <Track attributeKey="NA12878.GRCh38.haplotagged.bam Junctions" autoScale="false" clazz="org.broad.igv.sam.SpliceJunctionTrack" fontSize="10" groupByStrand="false" height="60" id="http://web/~zkronenberg/palladium/denovo/NA12878.GRCh38.haplotagged.bam_junctions" maxdepth="50" name="NA12878.GRCh38.haplotagged.bam Junctions" visible="false"/>
+        <Track attributeKey="NA12878.GRCh38.haplotagged.bam" clazz="org.broad.igv.sam.AlignmentTrack" color="185,185,185" displayMode="SQUISHED" experimentType="THIRD_GEN" fontSize="10" id="http://web/~zkronenberg/palladium/denovo/NA12878.GRCh38.haplotagged.bam" name="NA12878.GRCh38.haplotagged.bam" visible="true">
+            <RenderOptions colorByTag="HP" colorOption="TAG" groupByOption="TAG" groupByTag="HP"/>
+        </Track>
+    </Panel>
+    <Panel height="266" name="Panel1701903559220" width="1903">
+        <Track attributeKey="NA12877.GRCh38.haplotagged.bam Coverage" autoScale="true" clazz="org.broad.igv.sam.CoverageTrack" fontSize="10" id="http://web/~zkronenberg/palladium/denovo/NA12877.GRCh38.haplotagged.bam_coverage" name="NA12877.GRCh38.haplotagged.bam Coverage" snpThreshold="0.2" visible="true">
+            <DataRange baseline="0.0" drawBaseline="true" flipAxis="false" maximum="170.0" minimum="0.0" type="LINEAR"/>
+        </Track>
+        <Track attributeKey="NA12877.GRCh38.haplotagged.bam Junctions" autoScale="false" clazz="org.broad.igv.sam.SpliceJunctionTrack" fontSize="10" groupByStrand="false" height="60" id="http://web/~zkronenberg/palladium/denovo/NA12877.GRCh38.haplotagged.bam_junctions" maxdepth="50" name="NA12877.GRCh38.haplotagged.bam Junctions" visible="false"/>
+        <Track attributeKey="NA12877.GRCh38.haplotagged.bam" clazz="org.broad.igv.sam.AlignmentTrack" color="185,185,185" displayMode="SQUISHED" experimentType="THIRD_GEN" fontSize="10" id="http://web/~zkronenberg/palladium/denovo/NA12877.GRCh38.haplotagged.bam" name="NA12877.GRCh38.haplotagged.bam" visible="true">
+            <RenderOptions colorByTag="HP" colorOption="TAG" groupByOption="TAG" groupByTag="HP"/>
+        </Track>
+    </Panel>
+    <Panel height="324" name="Panel1701904241819" width="1903">
+        <Track attributeKey="NA12879.GRCh38.haplotagged.bam Coverage" autoScale="true" clazz="org.broad.igv.sam.CoverageTrack" fontSize="10" id="http://web/~zkronenberg/palladium/denovo/NA12879.GRCh38.haplotagged.bam_coverage" name="NA12879.GRCh38.haplotagged.bam Coverage" snpThreshold="0.2" visible="true">
+            <DataRange baseline="0.0" drawBaseline="true" flipAxis="false" maximum="113.0" minimum="0.0" type="LINEAR"/>
+        </Track>
+        <Track attributeKey="NA12879.GRCh38.haplotagged.bam Junctions" autoScale="false" clazz="org.broad.igv.sam.SpliceJunctionTrack" fontSize="10" groupByStrand="false" height="60" id="http://web/~zkronenberg/palladium/denovo/NA12879.GRCh38.haplotagged.bam_junctions" maxdepth="50" name="NA12879.GRCh38.haplotagged.bam Junctions" visible="false"/>
+        <Track attributeKey="NA12879.GRCh38.haplotagged.bam" clazz="org.broad.igv.sam.AlignmentTrack" color="185,185,185" displayMode="SQUISHED" experimentType="THIRD_GEN" fontSize="10" id="http://web/~zkronenberg/palladium/denovo/NA12879.GRCh38.haplotagged.bam" name="NA12879.GRCh38.haplotagged.bam" visible="true">
+            <RenderOptions colorByTag="HP" colorOption="TAG" groupByOption="TAG" groupByTag="HP"/>
+        </Track>
+    </Panel>
+    <Panel height="295" name="Panel1708022478322" width="1903">
+        <Track attributeKey="NA12887.GRCh38.haplotagged.bam Coverage" autoScale="true" clazz="org.broad.igv.sam.CoverageTrack" fontSize="10" id="http://web/~dbaker/palladium/NA12887.GRCh38.haplotagged.bam_coverage" name="NA12887.GRCh38.haplotagged.bam Coverage" snpThreshold="0.01" visible="true">
+            <DataRange baseline="0.0" drawBaseline="true" flipAxis="false" maximum="139.0" minimum="0.0" type="LINEAR"/>
+        </Track>
+        <Track attributeKey="NA12887.GRCh38.haplotagged.bam Junctions" autoScale="false" clazz="org.broad.igv.sam.SpliceJunctionTrack" fontSize="10" groupByStrand="false" height="60" id="http://web/~dbaker/palladium/NA12887.GRCh38.haplotagged.bam_junctions" maxdepth="50" name="NA12887.GRCh38.haplotagged.bam Junctions" visible="true"/>
+        <Track attributeKey="NA12887.GRCh38.haplotagged.bam" clazz="org.broad.igv.sam.AlignmentTrack" color="185,185,185" displayMode="SQUISHED" experimentType="THIRD_GEN" fontSize="10" id="http://web/~dbaker/palladium/NA12887.GRCh38.haplotagged.bam" name="NA12887.GRCh38.haplotagged.bam" visible="true">
+            <RenderOptions colorByTag="HP" colorOption="TAG" groupByOption="TAG" groupByTag="HP"/>
+        </Track>
+    </Panel>
+    <Panel height="54" name="FeaturePanel" width="1903">
+        <Track attributeKey="Reference sequence" clazz="org.broad.igv.track.SequenceTrack" fontSize="10" id="Reference sequence" name="Reference sequence" sequenceTranslationStrandValue="POSITIVE" shouldShowTranslation="false" visible="true"/>
+        <Track attributeKey="Refseq Genes" clazz="org.broad.igv.track.FeatureTrack" colorScale="ContinuousColorScale;0.0;836.0;255,255,255;0,0,178" fontSize="10" groupByStrand="false" id="https://hgdownload.soe.ucsc.edu/goldenPath/hg38/database/ncbiRefSeq.txt.gz" name="Refseq Genes" visible="true"/>
+    </Panel>
+    <PanelLayout dividerFractions="0.008426966292134831,0.32724719101123595,0.43679775280898875,0.7640449438202247,0.9396067415730337"/>
+    <HiddenAttributes>
+        <Attribute name="DATA FILE"/>
+        <Attribute name="DATA TYPE"/>
+        <Attribute name="NAME"/>
+    </HiddenAttributes>
+</Session>
