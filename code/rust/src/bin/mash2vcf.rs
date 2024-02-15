@@ -99,18 +99,21 @@ fn main() {
     let inputkeys: Vec<String> = args.ik.split(',').map(str::to_string).collect();
 
     upset_r
-        .write(b"site\t")
+        .write_all(b"site\t")
         .expect("Issue writing to upsetr file");
     for i in &inputkeys {
         upset_r
-            .write(format!("{}\t", i).as_bytes())
+            .write_all(format!("{}\t", i).as_bytes())
             .expect("Issue writing to upsetr file");
     }
-    upset_r.write(b"\n").expect("Issue writing to upsetr file");
+    upset_r
+        .write_all(b"\n")
+        .expect("Issue writing to upsetr file");
 
     header.push_str(&samples.join("\t"));
     header.push('\n');
-    vcf.write(header.as_bytes()).expect("Failure to write vcf");
+    vcf.write_all(header.as_bytes())
+        .expect("Failure to write vcf");
 
     for line in read_to_string(args.mashed).unwrap().lines() {
         let fields: Vec<String> = line.split_whitespace().map(str::to_string).collect();
@@ -126,17 +129,21 @@ fn main() {
         let source_lookup: HashSet<String> = HashSet::from_iter(sources.iter().cloned());
 
         upset_r
-            .write(format!("{}\t", fields[0]).as_bytes())
+            .write_all(format!("{}\t", fields[0]).as_bytes())
             .expect("Issue writing to upsetr file");
 
         for i in &inputkeys {
             if source_lookup.contains(i) {
-                upset_r.write(b"1\t").expect("Issue writing to upsetr file");
+                upset_r
+                    .write_all(b"1\t")
+                    .expect("Issue writing to upsetr file");
             } else {
-                upset_r.write(b"0\t").expect("Issue writing to upsetr file");
+                upset_r
+                    .write_all(b"0\t")
+                    .expect("Issue writing to upsetr file");
             }
         }
-        upset_r.write(b"\n").unwrap();
+        upset_r.write_all(b"\n").unwrap();
 
         let fg = geno[0].clone();
 
@@ -182,19 +189,19 @@ fn main() {
 
         if record.filter == "PASS" {
             pass_bed
-                .write(
+                .write_all(
                     format!("{}\t{}\t{}\n", pos_allele[0], pos_allele[1], pos_allele[2]).as_bytes(),
                 )
                 .expect("failed to write bed");
         } else {
             fail_bed
-                .write(
+                .write_all(
                     format!("{}\t{}\t{}\n", pos_allele[0], pos_allele[1], pos_allele[2]).as_bytes(),
                 )
                 .expect("failed to write bed");
         }
 
-        vcf.write(format!("{}\n", record).as_bytes())
+        vcf.write_all(format!("{}\n", record).as_bytes())
             .expect("Failure to write record to vcf");
     }
 

@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = [ "Zev Kronenberg <zkronenberg@pacificbiosciences.com>"]
 description = "Filter and report variant counts"
 edition = "2021"
+keywords = ["variant-calling", "inheritance", "genetics"]
+repository = "https://github.com/PacificBiosciences/PlatinumPedigree"
+categories = ["science", "algorithms", "command-line-utilities"]
 
 [[bin]]
 name = "concordance"

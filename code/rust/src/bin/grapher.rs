@@ -345,7 +345,7 @@ fn main() {
     let mut ovl_file = File::create(ovl_fn).expect("Unable to output seq file");
 
     ovl_file
-        .write("#chr\tstart\tref_allele\talt_allele\toverlap_type\tidx\n".as_bytes())
+        .write_all("#chr\tstart\tref_allele\talt_allele\toverlap_type\tidx\n".as_bytes())
         .unwrap();
 
     let seq_results_fn: String = format!("{}.haps.fasta", args.prefix);
@@ -375,7 +375,7 @@ fn main() {
         for h in &data.variants {
             for v in h {
                 if v.ovl != OvlType::NoOvl {
-                    ovl_file.write(format!("{}\n", v).as_bytes()).unwrap();
+                    ovl_file.write_all(format!("{}\n", v).as_bytes()).unwrap();
                 }
             }
         }
@@ -402,7 +402,7 @@ fn main() {
                 json_stuct.insert(meta.clone(), vus);
 
                 seq_file
-                    .write(format!(">{}\n{}\n", meta, hap).as_bytes())
+                    .write_all(format!(">{}\n{}\n", meta, hap).as_bytes())
                     .unwrap();
             }
         }
@@ -415,7 +415,7 @@ fn main() {
                 .as_bytes(),
         )
         .unwrap();
-    json_writer.write("\n".as_bytes()).unwrap();
+    json_writer.write_all("\n".as_bytes()).unwrap();
     json_writer.flush().unwrap();
     info!("done writing variants to json");
 }
