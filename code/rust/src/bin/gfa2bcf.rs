@@ -17,7 +17,7 @@ struct Args {
     #[arg(help = "Input {b,v}cf path")]
     vcf: PathBuf,
     #[arg(short, long, help = "Output [bv]cf path")]
-    bcf: Option<PathBuf>,
+    output: Option<PathBuf>,
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count, default_value_t = 0)]
     verbosity: u8,
     #[arg(
@@ -219,7 +219,7 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let header_view = reader_for_header.header();
 
     let use_bcf = args
-        .bcf
+        .output
         .as_ref()
         .and_then(|bcf| {
             bcf.extension()
@@ -239,7 +239,7 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         bcf::Format::Vcf
     };
     let bcf = args
-        .bcf
+        .output
         .as_ref()
         .map_or("-".to_string(), |x| x.display().to_string());
     let uncompressed = args.uncompressed.unwrap_or(!use_bcf);
@@ -321,12 +321,21 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         } else {
             id
         };
+        let orig_genotypes = format!("{:?}", record.genotypes());
         let id = format!("{id}:{}", id_from_alens(&alens));
         record.set_id(id.as_bytes())?;
         if !seqs.is_empty() {
-            let alleles = seqs.iter().map(|x| x.as_bytes()).collect::<Vec<&[u8]>>();
+            let mut alleles: Vec<&[u8]> = vec![b"N"];
+            for seq in &seqs {
+                alleles.push(seq.as_bytes());
+            }
             record.set_alleles(&alleles[..])?;
         }
+        let final_genotypes = format!("{:?}", record.genotypes());
+        assert_eq!(
+            final_genotypes, orig_genotypes,
+            "Old geno: {orig_genotypes}. Now geno: {final_genotypes}"
+        );
     }
 
     log::info!("Processed, writing out");
