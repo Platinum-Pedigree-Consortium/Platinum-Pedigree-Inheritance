@@ -341,7 +341,13 @@ impl File {
                     links.push(line);
                 }
                 Category::Segment => {
-                    name2idx.insert(line.name.as_ref().unwrap().clone(), segments.len());
+                    name2idx.insert(
+                        line.name
+                            .as_ref()
+                            .ok_or(Error("No name for segment".into()))?
+                            .clone(),
+                        segments.len(),
+                    );
                     segments.push(line);
                 }
             }
@@ -396,6 +402,7 @@ impl std::fmt::Display for File {
     }
 }
 
+///
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Copy)]
 pub enum Orientation {
     Forward, // '>'
@@ -408,15 +415,19 @@ impl Orientation {
     /// # Panics
     /// Panics if char is not in expected set "<>*".
     #[must_use]
-    pub fn new(x: char) -> Self {
+    pub fn try_new(x: char) -> Option<Self> {
         match x {
-            '>' => Self::Forward,
-            '<' => Self::Reverse,
-            '*' => Self::Star,
-            _ => {
-                panic!("Unexpected orientation: {x}");
-            }
+            '>' => Some(Self::Forward),
+            '<' => Some(Self::Reverse),
+            '*' => Some(Self::Star),
+            _ => None,
         }
+    }
+    #[must_use]
+    pub fn new(x: char) -> Self {
+        Self::try_new(x).unwrap_or_else(|| {
+            panic!("Unexpected orientation: {x}");
+        })
     }
 }
 
