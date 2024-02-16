@@ -341,7 +341,13 @@ impl File {
                     links.push(line);
                 }
                 Category::Segment => {
-                    name2idx.insert(line.name.as_ref().unwrap().clone(), segments.len());
+                    name2idx.insert(
+                        line.name
+                            .as_ref()
+                            .ok_or(Error("No name for segment".into()))?
+                            .clone(),
+                        segments.len(),
+                    );
                     segments.push(line);
                 }
             }

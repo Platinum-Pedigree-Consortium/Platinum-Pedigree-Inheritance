@@ -29,55 +29,46 @@ struct Args {
 }
 
 /*
-#[derive(Debug)]
-struct VcfRecord {
-    chrom: String,
-    start: i64,
-    id: String,
-    ref_allele: String,
-    alt_allele: String,
-    qual: String,
-    filter: String,
-    info: String,
-    format: String,
-    genotypes: Vec<String>,
-}
-
-impl fmt::Display for VcfRecord {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-            self.chrom,
-            self.start,
-            self.id,
-            self.ref_allele,
-            self.alt_allele,
-            self.qual,
-            self.filter,
-            self.info,
-            self.format,
-            self.genotypes.join("\t")
-        )
-    }
-}
+REF - reference base(s): Each base must be one of A,C,G,T,N (case insensitive). Multiple bases are permitted.
+The value in the POS field refers to the position of the first base in the String.
+---
+For simple insertions and
+deletions in which either the REF or one of the ALT alleles would otherwise be null/empty, the REF and ALT
+Strings must include the base before the event (which must be reflected in the POS field), unless the event
+occurs at position 1 on the contig in which case it must include the base after the event; this padding base is
+not required (although it is permitted) for e.g. complex substitutions or other events where all alleles have at
+least one base represented in their Strings.
+---
+If any of the ALT alleles is a symbolic allele (an angle-bracketed
+ID String “<ID>”) then the padding base is required and POS denotes the coordinate of the base preceding
+the polymorphism. Tools processing VCF files are not required to preserve case in the allele Strings. (String,
+Required).
+5. ALT - alternate base(s): Comma separated list of alternate non-reference alleles. These alleles do not have to
+be called in any of the samples. Options are base Strings made up of the bases A,C,G,T,N,*, (case insensitive)
+or an angle-bracketed ID String (“<ID>”) or a breakend replacement string as described in the section on
+breakends. The ‘*’ allele is reserved to indicate that the allele is missing due to a upstream deletion. If there
+are no alternative alleles, then the missing value should be used. Tools processing VCF files are not required
+to preserve case in the allele String, except for IDs, which are case sensitive. (String; no whitespace, commas,
+or angle-brackets are permitted in the ID String itself)
 */
 
+#[inline]
+pub fn rc_char(x: char) -> char {
+    match x {
+        'A' => 'T',
+        'C' => 'G',
+        'G' => 'C',
+        'T' => 'A',
+        'a' => 't',
+        'c' => 'g',
+        'g' => 'c',
+        't' => 'a',
+        _ => '?',
+    }
+}
+
 pub fn rc(x: &str) -> String {
-    x.chars()
-        .rev()
-        .map(|x| match x {
-            'A' => 'T',
-            'C' => 'G',
-            'G' => 'C',
-            'T' => 'A',
-            'a' => 't',
-            'c' => 'g',
-            'g' => 'c',
-            't' => 'a',
-            _ => '?',
-        })
-        .collect::<String>()
+    x.chars().rev().map(rc_char).collect::<String>()
 }
 
 #[derive(Debug)]
@@ -133,6 +124,15 @@ impl VariantDatum {
         &self.vertex_start[start..]
     }
 
+    pub fn vertex_start_orientation(&self) -> Orientation {
+        Orientation::new(self.vertex_start.chars().next().unwrap())
+    }
+    /*
+    pub fn vertex_end_orientation(&self) -> Orientation {
+        Orientation::new(self.vertex_end.chars().next().unwrap())
+    }
+    */
+
     /// Get id for vertex for end.
     /// Trims the leading '>' character.
     /// If no '>' is present, uses the string directly.
@@ -167,15 +167,15 @@ fn extract_seq(input: (&Orientation, &String), gfa: &rgfa::File) -> String {
     }
 }
 
-fn dot_if_empty(mut x: String) -> String {
+fn star_if_empty(mut x: String) -> String {
     if x.is_empty() {
-        x.push('.');
+        x.push('*');
     }
     x
 }
 
 fn make_seq(alleles: &[(Orientation, String)], gfa: &rgfa::File) -> String {
-    dot_if_empty(
+    star_if_empty(
         Itertools::intersperse(
             alleles.iter().map(|(orient, seq)| match orient {
                 Orientation::Forward | Orientation::Reverse => extract_seq((orient, seq), gfa),
@@ -198,17 +198,20 @@ fn id_from_alens(alens: &[i32], walks: &[Vec<(Orientation, String)>]) -> &'stati
         && alens[0] == alens[1]
         && *alens.iter().max().unwrap() > 0
         && walks.iter().all(|x| x.len() == 1)
-        && walks.iter().map(|x| &x[0].1).unique().count() == 1
     {
-        assert_eq!(
+        if walks.iter().map(|x| &x[0].1).unique().count() == 1 {
+            assert_eq!(
             walks.iter().map(|x| x[0].0).unique().count(),
             2,
             "Make sure that the two identical walks are used in opposite orientations. Walks: {walks:?}"
         );
-        // If the same walk is used in both alleles, then
-        "INV"
+            // If the same walk is used in both alleles, then
+            "INV"
+        } else {
+            "MNP" // Not an inversion, same length.
+        }
     } else {
-        "."
+        "SV"
     }
 }
 
@@ -236,12 +239,12 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             bcf.extension()
                 .map(|x| x.to_str().expect("Could not convert to utf-8").to_string())
         })
-        .map_or(true, |x| match &x[..] {
+        .map_or(false, |x| match &x[..] {
             "vcf" => false,
             "bcf" => true,
             _ => {
-                log::warn!("Unexpected extension {x:?}. Defaulting to bcf format.)");
-                true
+                log::warn!("Unexpected extension {x:?}. Defaulting to vcf format.)");
+                false
             }
         });
     let format = if use_bcf {
@@ -299,21 +302,70 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                 rgfa::decompose_walk(walk)?
             })
         }
+        let initial_pos = record.pos();
         assert_eq!(walks.len(), data.alen.len());
-        let seqs = walks
+        let mut seqs = walks
             .iter()
             .map(|x| make_seq(&x[..], &gfa))
             .collect::<Vec<_>>();
         let alens = seqs
             .iter()
-            .map(|x| if x == "." { 0 } else { x.len() as i32 })
+            .map(|x| if x == "*" { 0 } else { x.len() as i32 })
             .collect::<Vec<_>>();
+        let reflen_zero = alens.first() == Some(&0);
+        let varlen_zero = alens[1..].iter().min() == Some(&0);
+        // Pad with previous base if necessary.
+        /*
+        VCF4.2 spec: if any allele is empty (IE, min length is 0), then these strings must include the base before the event.
+        ```
+        For simple insertions and
+        deletions in which either the REF or one of the ALT alleles would otherwise be null/empty, the REF and ALT
+        Strings must include the base before the event (which must be reflected in the POS field), unless the event
+        occurs at position 1 on the contig in which case it must include the base after the event; this padding base is
+        not required (although it is permitted) for e.g. complex substitutions or other events where all alleles have at
+        least one base represented in their Strings.
+        ```
+        */
+        let either_zero = reflen_zero || varlen_zero;
+        // We have to subtract one from position if we are adding a reference base here.
+        let final_pos = initial_pos - i64::from(either_zero);
+        if either_zero {
+            let preceding_seq = gfa.segments[vertex_start]
+                .sequence
+                .as_ref()
+                .ok_or_else(|| {
+                    rgfa::Error(format!(
+                        "segment {vertex_start_str}/{vertex_start} had no sequence"
+                    ))
+                })?;
+            let vertex_start_orientation = data.vertex_start_orientation();
+            let padding_char = match vertex_start_orientation {
+                Orientation::Forward => preceding_seq.chars().last().unwrap_or('*'),
+                Orientation::Reverse => rc_char(preceding_seq.chars().next().unwrap_or('*')),
+                Orientation::Star => {
+                    return Err(Box::new(rgfa::Error("Unexpected * orientation".into())));
+                }
+            };
+            for seq in &mut seqs {
+                *seq = if seq == "*" {
+                    padding_char.to_string()
+                } else {
+                    format!("{padding_char}{seq}")
+                }
+            }
+        }
+
+        // "*" allele if none present.
+        if seqs.len() == 1 {
+            seqs.push("*".into());
+        }
+
+        log::debug!("{} total seqs, seqs {seqs:?}", seqs.len());
         assert_eq!(
             alens, data.alen,
             "seqs: {seqs:?}. expected alens: {:?}, found {alens:?}",
             data.alen
         );
-        let pos = record.pos();
         let mut id = String::from_utf8(record.id()).expect("id not utf-8");
         if id == "." {
             let length_str =
@@ -321,23 +373,17 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                     .collect::<String>();
             id = length_str;
         }
-        let orig_genotypes = format!("{:?}", record.genotypes()?);
-        let orig_genotypes = orig_genotypes.split_terminator("Buffer").next().unwrap();
-        let id = format!("{}:{id}:{pos}", id_from_alens(&alens, &walks));
+        let id = format!("{}:{id}:{final_pos}", id_from_alens(&alens, &walks));
         record.set_id(id.as_bytes())?;
+        if final_pos != initial_pos {
+            record.set_pos(final_pos);
+        }
+
+        // Assign alleles
         if !seqs.is_empty() {
-            let mut alleles: Vec<&[u8]> = vec![b"N"];
-            for seq in &seqs {
-                alleles.push(seq.as_bytes());
-            }
+            let alleles = seqs.iter().map(|x| x.as_bytes()).collect::<Vec<&[u8]>>();
             record.set_alleles(&alleles[..])?;
         }
-        let final_genotypes = format!("{:?}", record.genotypes()?);
-        let final_genotypes = final_genotypes.split_terminator("Buffer").next().unwrap();
-        assert_eq!(
-            final_genotypes, orig_genotypes,
-            "Old geno: {orig_genotypes}. Now geno: {final_genotypes}"
-        );
     }
 
     log::info!("Processed, writing out");
