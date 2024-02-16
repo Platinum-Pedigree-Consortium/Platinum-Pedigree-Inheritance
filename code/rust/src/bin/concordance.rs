@@ -91,11 +91,11 @@ fn okay_genotypes(iht: &InheritanceBlock) -> HashMap<String, Vec<[i32; 2]>> {
         for j in &iht.parental_hap {
             let possible_geno = format!(
                 "{}|{}",
-                i[allele_conversion(j.chars().nth(0).unwrap())],
+                i[allele_conversion(j.chars().next().unwrap())],
                 i[allele_conversion(j.chars().nth(1).unwrap())]
             );
             phased_genotypes.push([
-                i[allele_conversion(j.chars().nth(0).unwrap())],
+                i[allele_conversion(j.chars().next().unwrap())],
                 i[allele_conversion(j.chars().nth(1).unwrap())],
             ]);
 
@@ -113,10 +113,10 @@ fn okay_genotypes(iht: &InheritanceBlock) -> HashMap<String, Vec<[i32; 2]>> {
                 }
             }
         } else {
-            lookup.insert(onevec, phased_genotypes);
+            lookup.insert(onevec.clone(), phased_genotypes);
         }
     }
-    return lookup;
+    lookup
 }
 
 impl std::fmt::Display for InheritanceBlock {
@@ -143,8 +143,8 @@ fn parse_inht(inht_fn: String) -> Vec<InheritanceBlock> {
     for record in reader.expect("Error reading inheritance CSV.").records() {
         let mut ihtblock = InheritanceBlock {
             chrom: record.as_ref().unwrap()[0].to_string().clone(),
-            start: record.as_ref().unwrap()[1].parse::<i32>().unwrap().clone(),
-            end: record.as_ref().unwrap()[2].parse::<i32>().unwrap().clone(),
+            start: record.as_ref().unwrap()[1].parse::<i32>().unwrap(),
+            end: record.as_ref().unwrap()[2].parse::<i32>().unwrap(),
             passing_count: 0,
             failing_count: 0,
             samples: Vec::new(),
@@ -155,19 +155,15 @@ fn parse_inht(inht_fn: String) -> Vec<InheritanceBlock> {
 
         let mut one_parent = false;
 
-        let mut sidx: usize = 0;
-        for i in 3..header.len() {
+        for (sidx, i) in (3..header.len()).enumerate() {
             // Some inheritance vectors do not contain both parental marker, for example you might see `A` rather than `AB`.
             // We want to skip these sites as the expected genotypes are unknown.
             if record.as_ref().unwrap()[i].to_string().len() == 1 {
                 one_parent = true;
             }
             // putting the sample names in the header into the inheritance block for easy lookup
-            ihtblock
-                .sample_lookups
-                .insert((&header[i]).to_string(), sidx);
-            ihtblock.samples.push((&header[i]).to_string());
-            sidx += 1;
+            ihtblock.sample_lookups.insert(header[i].to_string(), sidx);
+            ihtblock.samples.push(header[i].to_string());
             // geno
             ihtblock
                 .parental_hap
@@ -181,7 +177,7 @@ fn parse_inht(inht_fn: String) -> Vec<InheritanceBlock> {
         println!("{}", ihtblock);
         inht_info.push(ihtblock);
     }
-    return inht_info;
+    inht_info
 }
 
 fn header_to_idx(h: &HeaderView) -> HashMap<String, usize> {
@@ -192,22 +188,22 @@ fn header_to_idx(h: &HeaderView) -> HashMap<String, usize> {
         println!("idx:{} sample:{}", i, s); // output sample name
         lookup.insert(s, i);
     }
-    return lookup;
+    lookup
 }
 
 fn get_iht_block<'a>(
-    ihts: &'a Vec<InheritanceBlock>,
+    ihts: &'a [InheritanceBlock],
     chr: &str,
     pos: i32,
     current: &mut usize,
 ) -> Option<&'a InheritanceBlock> {
-    for i in *current..ihts.len() {
-        if (ihts[i].chrom == chr) && (pos >= ihts[i].start) && (pos <= ihts[i].end) {
-            return Some(&ihts[i]);
+    for item in ihts.iter().skip(*current) {
+        if (item.chrom == chr) && (pos >= item.start) && (pos <= item.end) {
+            return Some(item);
         }
         *current += 1;
     }
-    return None;
+    None
 }
 
 fn main() {
@@ -238,7 +234,7 @@ fn main() {
     let mut passed: i64 = 0;
     let mut fail_counts: HashMap<String, i64> = HashMap::new();
 
-    for (_i, record_result) in bcf.records().enumerate() {
+    for record_result in bcf.records() {
         let mut record = record_result.expect("Fail to read record");
         // only looking at bi-allelic sites
         if record.alleles().len() != 2 {
@@ -277,7 +273,7 @@ fn main() {
                 onevec,
                 geno_conversion(gts.get(ped_idx_lookup[s]).to_string())
             );
-            genostring = format!("{},{}", genostring, gts.get(ped_idx_lookup[s]).to_string());
+            genostring = format!("{},{}", genostring, gts.get(ped_idx_lookup[s]));
         }
 
         // this is a hom ref site for the individuals in the group of interest.
@@ -301,7 +297,7 @@ fn main() {
             let mut closestmatch: String = "".to_string();
 
             for (k, _v) in inheritance[current_block_idx].patterns.iter() {
-                let ed = edit_distance(&k, &onevec);
+                let ed = edit_distance(k, &onevec);
                 if ed == 1 {
                     oneoffcount += 1;
                     closestmatch = k.to_string();
@@ -316,9 +312,9 @@ fn main() {
                     }
                 }
 
-                let has_nocall = onevec.find("3");
+                let has_nocall = onevec.find('3');
                 let nocall_violation = match has_nocall {
-                    Some(index) => true,
+                    Some(_index) => true,
                     None => false,
                 };
 
@@ -352,12 +348,7 @@ fn main() {
             let gt = gts.get(sample_index);
 
             if block.unwrap().sample_lookups.contains_key(&sample_name) {
-                let gt_idx: usize = block
-                    .unwrap()
-                    .sample_lookups
-                    .get(&sample_name)
-                    .unwrap()
-                    .clone();
+                let gt_idx: usize = *block.unwrap().sample_lookups.get(&sample_name).unwrap();
 
                 new_gts.push(GenotypeAllele::Phased(phased_genos[gt_idx][0]));
                 new_gts.push(GenotypeAllele::Phased(phased_genos[gt_idx][1]));
@@ -384,8 +375,8 @@ fn main() {
                     panic!("FATAL: trying to set the wrong genotype");
                 }
             } else {
-                for g in gt.iter() {
-                    new_gts.push(g.clone());
+                for g in gt.iter().cloned() {
+                    new_gts.push(g);
                 }
             }
         }

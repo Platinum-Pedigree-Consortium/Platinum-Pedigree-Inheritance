@@ -103,16 +103,16 @@ fn main() {
     info!("num vars {} ", haplotype_vars.len());
 
     for line in read_to_string(args.paf.clone()).unwrap().lines() {
-        let paf_parts: Vec<String> = line.split("\t").map(str::to_string).collect();
+        let paf_parts: Vec<String> = line.split('\t').map(str::to_string).collect();
         let edit_dist_parts: Vec<String> = paf_parts
             .get(12)
             .unwrap()
-            .split(":")
+            .split(':')
             .map(str::to_string)
             .collect();
-        let hapkey = paf_parts.get(0).unwrap().clone();
-        let hapkey_parts: Vec<String> = hapkey.split(".").map(str::to_string).collect();
-        let final_key = hapkey_parts.get(0).unwrap();
+        let hapkey = paf_parts.first().unwrap().clone();
+        let hapkey_parts: Vec<String> = hapkey.split('.').map(str::to_string).collect();
+        let final_key = hapkey_parts.first().unwrap();
         let aln_len = paf_parts.get(10).unwrap().parse::<i32>().unwrap();
 
         let edit_distance = edit_dist_parts.get(2).unwrap().parse::<u16>().unwrap();
@@ -164,13 +164,13 @@ fn main() {
     }
 
     varriant_anno_fh
-        .write(
+        .write_all(
             serde_json::to_string_pretty(&variant_anno)
                 .unwrap()
                 .as_bytes(),
         )
         .expect("Failure to write variant json");
     varriant_anno_fh
-        .write("\n".as_bytes())
+        .write_all("\n".as_bytes())
         .expect("Failure to write to variant json");
 }

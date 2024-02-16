@@ -112,7 +112,7 @@ impl fmt::Display for Var {
 
 impl Var {
     fn varlen(&self) -> usize {
-        return self.ref_allele.len() - self.alt_allele.len();
+        self.ref_allele.len() - self.alt_allele.len()
     }
 }
 
@@ -120,13 +120,13 @@ fn get_end(pos: i64, vtype: VarType, alleles: Vec<&[u8]>) -> i64 {
     if vtype == VarType::Snv || vtype == VarType::Insertion {
         return pos;
     }
-    return pos + (alleles[0].len() - alleles[1].len()) as i64;
+    pos + (alleles[0].len() - alleles[1].len()) as i64
 }
 
 fn get_var_type(alleles: Vec<&[u8]>) -> VarType {
     assert!(alleles.len() == 2);
     if alleles[0].len() == alleles[1].len() && alleles[1].len() == 1 {
-        return VarType::Snv;
+        VarType::Snv
     } else if alleles[0].len() > alleles[1].len() {
         return VarType::Deletion;
     } else {
@@ -145,18 +145,18 @@ fn parse_region(rstring: String, header: &HeaderView) -> Region {
     }
 }
 
-fn build_haplotypes(haplotype: &Vec<Var>, refseq: &String, region_start: i64) -> String {
-    let mut hap: Vec<char> = refseq.clone().chars().collect();
+fn build_haplotypes(haplotype: &Vec<Var>, refseq: &str, region_start: i64) -> String {
+    let mut hap: Vec<char> = refseq.chars().collect();
     for v in haplotype {
         match v.vt {
             VarType::Snv => {
                 let ref_base = v.ref_allele.as_bytes()[0] as char;
-                let seq_base = hap[(v.start - region_start as i64) as usize].to_ascii_uppercase();
+                let seq_base = hap[(v.start - region_start) as usize].to_ascii_uppercase();
                 assert!(ref_base == seq_base);
-                hap[(v.start - region_start as i64) as usize] = v.alt_allele.as_bytes()[0] as char
+                hap[(v.start - region_start) as usize] = v.alt_allele.as_bytes()[0] as char
             }
             VarType::Deletion => {
-                let left = (v.start + 1) - region_start as i64;
+                let left = (v.start + 1) - region_start;
                 let mut right = left + v.varlen() as i64;
 
                 right = std::cmp::min(right, (hap.len() as i64) - 1);
@@ -173,7 +173,7 @@ fn build_haplotypes(haplotype: &Vec<Var>, refseq: &String, region_start: i64) ->
         if i.vt == VarType::Insertion {
             let mut insert_seq = i.alt_allele.chars().collect::<Vec<char>>();
             insert_seq.remove(0);
-            let left = (i.start + 1) - region_start as i64;
+            let left = (i.start + 1) - region_start;
             hap.splice((left as usize)..(left as usize), insert_seq);
         }
     }
@@ -188,7 +188,7 @@ fn load_data(
 ) -> Data {
     let mut variants = [Vec::new(), Vec::new()];
 
-    let fasta = FaidxReader::from_path((*args).fasta.clone()).expect("Failed to open FASTA");
+    let fasta = FaidxReader::from_path(args.fasta.clone()).expect("Failed to open FASTA");
 
     let region_seq = fasta
         .fetch_seq_string(
@@ -213,7 +213,7 @@ fn load_data(
         alt_allele: "".to_string(),
         ovl: OvlType::NoOvl,
         next_vars: Vec::new(),
-        idx: 0 as usize,
+        idx: 0_usize,
     };
 
     variants[0].push(dummy.clone());
@@ -243,7 +243,7 @@ fn load_data(
             seqid: region.name.clone(),
             vt: vtype.clone(),
             start: r.pos(),
-            end: end,
+            end,
             ref_allele: (*str::from_utf8(r.alleles()[0]).unwrap()).to_string(),
             alt_allele: (*str::from_utf8(r.alleles()[1]).unwrap()).to_string(),
             ovl: OvlType::NoOvl,
@@ -261,11 +261,11 @@ fn load_data(
         let mut last_var: &mut Var = &mut variants[vindex][last_idx];
 
         if last_var.end >= entry.start {
-            (*last_var).ovl = OvlType::OvlNext;
+            last_var.ovl = OvlType::OvlNext;
             entry.ovl = OvlType::OvlPrev;
         }
 
-        while true {
+        loop {
             if last_var.end < entry.start {
                 last_var.next_vars.push(current_idx);
             }
@@ -279,23 +279,23 @@ fn load_data(
 
         variants[vindex].push(entry);
     }
-    return Data {
+    Data {
         region: Region {
             rid: region.rid,
             name: region.name.clone(),
             start: region.start,
             end: region.end,
         },
-        variants: variants,
+        variants,
         sequence: region_seq,
-    };
+    }
 }
 
 fn find_all_paths(graph: &[Var], start_idx: usize) -> Vec<Vec<Var>> {
     let mut paths = Vec::new();
     let mut visited = HashSet::new();
 
-    dfs(&graph, start_idx, &mut vec![], &mut visited, &mut paths);
+    dfs(graph, start_idx, &mut vec![], &mut visited, &mut paths);
 
     paths
 }
@@ -328,7 +328,7 @@ fn dfs(
 
 fn parse_regions(args: &Args) -> Vec<Region> {
     let mut regions: Vec<Region> = Vec::new();
-    let bcf = IndexedReader::from_path((*args).vcf.clone()).expect("Error opening vcf file.");
+    let bcf = IndexedReader::from_path(args.vcf.clone()).expect("Error opening vcf file.");
     let header = bcf.header().clone();
     for line in read_to_string(args.region.clone()).unwrap().lines() {
         regions.push(parse_region(line.to_string(), &header));
@@ -345,7 +345,7 @@ fn main() {
     let mut ovl_file = File::create(ovl_fn).expect("Unable to output seq file");
 
     ovl_file
-        .write("#chr\tstart\tref_allele\talt_allele\toverlap_type\tidx\n".as_bytes())
+        .write_all("#chr\tstart\tref_allele\talt_allele\toverlap_type\tidx\n".as_bytes())
         .unwrap();
 
     let seq_results_fn: String = format!("{}.haps.fasta", args.prefix);
@@ -375,21 +375,21 @@ fn main() {
         for h in &data.variants {
             for v in h {
                 if v.ovl != OvlType::NoOvl {
-                    ovl_file.write(format!("{}\n", v).as_bytes()).unwrap();
+                    ovl_file.write_all(format!("{}\n", v).as_bytes()).unwrap();
                 }
             }
         }
-        if args.discovery_only == true {
+        if args.discovery_only {
             continue;
         }
 
         // iterating over both phases
         for (iidx, i) in data.variants.iter().enumerate() {
             info!("Building all unique paths through overlapping variants");
-            let all_haps = find_all_paths(&i, 0);
+            let all_haps = find_all_paths(i, 0);
             // iterate over the possible unique haplotype paths
             for (vidx, v) in all_haps.iter().enumerate() {
-                let hap = build_haplotypes(&v, &data.sequence, data.region.start as i64);
+                let hap = build_haplotypes(v, &data.sequence, data.region.start as i64);
 
                 let meta = format!("{};{};hap:{}.{}", args.sample.clone(), r, iidx, vidx,);
 
@@ -402,7 +402,7 @@ fn main() {
                 json_stuct.insert(meta.clone(), vus);
 
                 seq_file
-                    .write(format!(">{}\n{}\n", meta, hap).as_bytes())
+                    .write_all(format!(">{}\n{}\n", meta, hap).as_bytes())
                     .unwrap();
             }
         }
@@ -415,7 +415,7 @@ fn main() {
                 .as_bytes(),
         )
         .unwrap();
-    json_writer.write("\n".as_bytes()).unwrap();
+    json_writer.write_all("\n".as_bytes()).unwrap();
     json_writer.flush().unwrap();
     info!("done writing variants to json");
 }

@@ -1,7 +1,7 @@
 use clap::Parser;
 use core::f32;
 use rust_htslib::bcf::record::GenotypeAllele;
-use rust_htslib::bcf::{Header, Read, Reader};
+use rust_htslib::bcf::{Read, Reader};
 use std::collections::HashMap;
 use std::fs::read_to_string;
 
@@ -53,8 +53,9 @@ enum Geno {
     NoCall,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 enum Iht {
+    #[default]
     Unknown,
     CanDenovo,
     IhtDenovo,
@@ -62,19 +63,15 @@ enum Iht {
     Valid,
 }
 
-impl Default for Iht {
-    fn default() -> Self {
-        Iht::Unknown
-    }
-}
-
 #[derive(Debug, Clone)]
 struct Member {
+    #[allow(dead_code)]
     family: String,
     id: String,
     father: String,
     mother: String,
     pub children: Vec<String>,
+    #[allow(dead_code)]
     sex: Sex,
     genotype: (GenotypeAllele, GenotypeAllele),
     geno: Geno,
@@ -87,11 +84,11 @@ fn parse_ped(filename: &str) -> HashMap<String, Member> {
     let mut children: HashMap<String, Vec<String>> = HashMap::new();
 
     for line in read_to_string(filename).unwrap().lines() {
-        let parts: Vec<String> = line.split("\t").map(str::to_string).collect();
+        let parts: Vec<String> = line.split('\t').map(str::to_string).collect();
 
         let mut sample_sex = Sex::Unknown;
 
-        if parts[4] == "1".to_string() {
+        if parts[4] == *"1" {
             sample_sex = Sex::Male;
         }
 
@@ -114,7 +111,7 @@ fn parse_ped(filename: &str) -> HashMap<String, Member> {
             },
         );
 
-        if parts[2].to_string() == "NA".to_string() || parts[3].to_string() == "NA".to_string() {
+        if parts[2] == *"NA" || parts[3] == *"NA" {
             continue;
         }
 
@@ -143,7 +140,7 @@ fn transmitted(parent: &Member, allele: &GenotypeAllele) -> i32 {
     if parent.genotype.1 == *allele {
         r += 1;
     }
-    return r;
+    r
 }
 
 fn check_iht(child: &Member, mother: &Member, father: &Member) -> (String, Iht) {
@@ -168,7 +165,7 @@ fn check_iht(child: &Member, mother: &Member, father: &Member) -> (String, Iht) 
     }
     */
 
-    return (child.id.clone(), Iht::Violation);
+    (child.id.clone(), Iht::Violation)
 }
 
 fn follow_family_transmission(
@@ -177,7 +174,7 @@ fn follow_family_transmission(
     transmissions: &mut HashMap<String, Iht>,
 ) {
     let person = family.get(focal).unwrap();
-    if person.father == "NA".to_string() || person.mother == "NA".to_string() {
+    if person.father == *"NA" || person.mother == *"NA" {
         return;
     }
 
@@ -221,15 +218,10 @@ fn follow_family_transmission(
 }
 
 fn avg_gq(family: &HashMap<String, Member>) -> f32 {
-    let mut gq_sum = 0;
-    for (_k, v) in family {
-        gq_sum += v.gq;
-    }
-
-    if gq_sum == 0 {
-        return 0f32;
+    if family.is_empty() {
+        0.
     } else {
-        return gq_sum as f32 / family.len() as f32;
+        family.values().map(|x| x.gq).sum::<i32>() as f32 / family.len() as f32
     }
 }
 
@@ -266,6 +258,7 @@ fn type_count(trans: &HashMap<String, Iht>) -> HashMap<String, i32> {
     cm
 }
 
+#[allow(non_snake_case)]
 #[derive(Debug, Clone)]
 struct SiteInfo {
     denovo: bool,
@@ -289,7 +282,7 @@ fn get_first_denovo(trans: &HashMap<String, Iht>) -> String {
     result
 }
 
-fn process_site(family: &HashMap<String, Member>, gq: i32, founders: &Vec<String>) -> SiteInfo {
+fn process_site(family: &HashMap<String, Member>, _gq: i32, founders: &Vec<String>) -> SiteInfo {
     let mut trans: HashMap<String, Iht> = HashMap::new();
     for k in founders {
         follow_family_transmission(family, k, &mut trans);
@@ -316,15 +309,15 @@ fn process_site(family: &HashMap<String, Member>, gq: i32, founders: &Vec<String
     }
 
     SiteInfo {
-        denovo: denovo,
+        denovo,
         denovo_sample: get_first_denovo(&trans),
-        classification: classification,
+        classification,
         unknown: *counts.get("UNKNOWN").unwrap(),
         total_count: trans.len() as i32,
         violations: *counts.get("VIOLATION").unwrap(),
         Valid: *counts.get("Valid").unwrap(),
         avg_gq: avg_gq(family),
-        min_ref_fraction: min_ref_fraction,
+        min_ref_fraction,
     }
 }
 
@@ -333,7 +326,7 @@ fn main() {
     let mut bcf = Reader::from_path(args.vcf).expect("Error opening vcf file.");
     let header = bcf.header().clone();
 
-    let founders: Vec<String> = args.founders.split(",").map(str::to_string).collect();
+    let founders: Vec<String> = args.founders.split(',').map(str::to_string).collect();
 
     let kindred = parse_ped(&args.ped);
 
@@ -347,7 +340,7 @@ fn main() {
 
     println!("#chr\tpos\talleles\tallele_count\tdenovo_sample\tclassification\tValid_count\tviolation_count\tunknown_count\ttotal_transmissions\taverage_site_gq\tmin_ref_fraction");
 
-    for (_i, record_result) in bcf.records().enumerate() {
+    for record_result in bcf.records() {
         let record = record_result.expect("Fail to read record");
         let chr = std::str::from_utf8(header.rid2name(record.rid().unwrap()).expect("InValid rid"))
             .unwrap();
@@ -379,37 +372,37 @@ fn main() {
             let sf = &mut local_family.get_mut(sample).unwrap();
 
             if sgt.len() != 2 {
-                (*sf).geno = Geno::NoCall;
+                sf.geno = Geno::NoCall;
                 continue;
             }
-            (*sf).genotype.0 = sgt[0];
-            (*sf).genotype.1 = sgt[1];
+            sf.genotype.0 = sgt[0];
+            sf.genotype.1 = sgt[1];
             if sgt[0] == GenotypeAllele::UnphasedMissing
                 || sgt[1] == GenotypeAllele::UnphasedMissing
                 || dp < args.dp
                 || gq < args.gq
             {
                 gq = 0;
-                (*sf).geno = Geno::NoCall;
+                sf.geno = Geno::NoCall;
             } else if sgt[0] != sgt[1] {
-                (*sf).geno = Geno::Het;
+                sf.geno = Geno::Het;
             } else if sgt[0] == GenotypeAllele::Unphased(0) {
-                (*sf).geno = Geno::HomRef;
+                sf.geno = Geno::HomRef;
             } else {
-                (*sf).geno = Geno::HomAlt;
+                sf.geno = Geno::HomAlt;
             }
-            (*sf).gq = gq;
+            sf.gq = gq;
 
-            if (*sf).geno != Geno::NoCall {
+            if sf.geno != Geno::NoCall {
                 let ref_count: f32 = ad_values[*idx][0] as f32;
                 let mut total_count: f32 = 0.0;
                 for v in ad_values[*idx] {
                     total_count += *v as f32;
                 }
                 if ref_count == 0.0 {
-                    (*sf).ref_ratio = 0.0;
+                    sf.ref_ratio = 0.0;
                 } else {
-                    (*sf).ref_ratio = ref_count / total_count;
+                    sf.ref_ratio = ref_count / total_count;
                 }
             }
         }
