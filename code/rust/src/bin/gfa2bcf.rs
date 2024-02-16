@@ -373,7 +373,11 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                     .collect::<String>();
             id = length_str;
         }
-        let id = format!("{}:{id}:{final_pos}", id_from_alens(&alens, &walks));
+        let id = format!(
+            "{}:{id}:{}",
+            id_from_alens(&alens, &walks),
+            final_pos + 1 /*account for 1-based VCF */
+        );
         record.set_id(id.as_bytes())?;
         if final_pos != initial_pos {
             record.set_pos(final_pos);
