@@ -1,3 +1,6 @@
+///
+/// Parser for rGFA format.
+///
 use std::borrow::ToOwned;
 use std::boxed::Box;
 use std::collections::{BTreeMap, HashMap};
@@ -100,11 +103,12 @@ impl Line {
     fn to(&self) -> Option<&String> {
         self.to.as_ref()
     }
+
     /*
     SN	Z	Name of stable sequence from which the segment is derived
     SO	i	Offset on the stable sequence
     SR	i	Rank. 0 if on a linear reference genome; >0 otherwise
-        */
+    */
     /// Offset
     #[must_use]
     pub fn sequence_offset(&self) -> Option<i64> {
@@ -114,6 +118,7 @@ impl Line {
             .and_then(|x| x.split_terminator(':').nth(2))
             .and_then(|x| x.parse::<i64>().ok())
     }
+
     /// Rank
     #[must_use]
     pub fn sequence_rank(&self) -> Option<i64> {
@@ -123,6 +128,7 @@ impl Line {
             .and_then(|x| x.split_terminator(':').nth(2))
             .and_then(|x| x.parse::<i64>().ok())
     }
+
     /// Sequence Name (target)
     #[must_use]
     pub fn sequence_name(&self) -> Option<&str> {
@@ -401,6 +407,7 @@ impl Orientation {
     /// Make Orientation from character.
     /// # Panics
     /// Panics if char is not in expected set "<>*".
+    #[must_use]
     pub fn new(x: char) -> Self {
         match x {
             '>' => Self::Forward,

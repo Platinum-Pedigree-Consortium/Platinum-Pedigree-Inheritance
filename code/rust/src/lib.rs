@@ -1,1 +1,1 @@
-pub mod gfa;
+pub mod rgfa;

@@ -1,4 +1,4 @@
-use concordance::gfa::{self, Orientation};
+use concordance::rgfa::{self, Orientation};
 
 use clap::Parser;
 use itertools::Itertools;
@@ -147,7 +147,7 @@ impl VariantDatum {
 struct WalkStep(pub String, pub Orientation);
 */
 
-fn extract_seq(input: (&Orientation, &String), gfa: &gfa::File) -> String {
+fn extract_seq(input: (&Orientation, &String), gfa: &rgfa::File) -> String {
     let (orient, vertex) = input;
     if vertex == "*" {
         return "".into();
@@ -174,7 +174,7 @@ fn dot_if_empty(mut x: String) -> String {
     x
 }
 
-fn make_seq(alleles: &[(Orientation, String)], gfa: &gfa::File) -> String {
+fn make_seq(alleles: &[(Orientation, String)], gfa: &rgfa::File) -> String {
     dot_if_empty(
         Itertools::intersperse(
             alleles.iter().map(|(orient, seq)| match orient {
@@ -214,7 +214,7 @@ fn id_from_alens(alens: &[i32], walks: &[Vec<(Orientation, String)>]) -> &'stati
 
 fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Loading gfa: {:?}.", args.gfa);
-    let gfa = gfa::File::from_path(&args.gfa)?;
+    let gfa = rgfa::File::from_path(&args.gfa)?;
 
     /*
     if log::log_enabled!(log::Level::Trace) {
@@ -296,7 +296,7 @@ fn core(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             walks.push(if walk == "*" {
                 vec![(Orientation::Star, "*".to_owned())]
             } else {
-                gfa::decompose_walk(walk)?
+                rgfa::decompose_walk(walk)?
             })
         }
         assert_eq!(walks.len(), data.alen.len());

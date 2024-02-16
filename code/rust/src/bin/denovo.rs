@@ -65,11 +65,13 @@ enum Iht {
 
 #[derive(Debug, Clone)]
 struct Member {
+    #[allow(dead_code)]
     family: String,
     id: String,
     father: String,
     mother: String,
     pub children: Vec<String>,
+    #[allow(dead_code)]
     sex: Sex,
     genotype: (GenotypeAllele, GenotypeAllele),
     geno: Geno,
@@ -216,15 +218,10 @@ fn follow_family_transmission(
 }
 
 fn avg_gq(family: &HashMap<String, Member>) -> f32 {
-    let mut gq_sum = 0;
-    for (_k, v) in family {
-        gq_sum += v.gq;
-    }
-
-    if gq_sum == 0 {
-        0f32
+    if family.is_empty() {
+        0.
     } else {
-        gq_sum as f32 / family.len() as f32
+        family.values().map(|x| x.gq).sum::<i32>() as f32 / family.len() as f32
     }
 }
 
@@ -261,6 +258,7 @@ fn type_count(trans: &HashMap<String, Iht>) -> HashMap<String, i32> {
     cm
 }
 
+#[allow(non_snake_case)]
 #[derive(Debug, Clone)]
 struct SiteInfo {
     denovo: bool,
@@ -342,7 +340,7 @@ fn main() {
 
     println!("#chr\tpos\talleles\tallele_count\tdenovo_sample\tclassification\tValid_count\tviolation_count\tunknown_count\ttotal_transmissions\taverage_site_gq\tmin_ref_fraction");
 
-    for (_i, record_result) in bcf.records().enumerate() {
+    for record_result in bcf.records() {
         let record = record_result.expect("Fail to read record");
         let chr = std::str::from_utf8(header.rid2name(record.rid().unwrap()).expect("InValid rid"))
             .unwrap();

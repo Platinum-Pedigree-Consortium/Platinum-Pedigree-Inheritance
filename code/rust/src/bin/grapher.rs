@@ -145,8 +145,8 @@ fn parse_region(rstring: String, header: &HeaderView) -> Region {
     }
 }
 
-fn build_haplotypes(haplotype: &Vec<Var>, refseq: &String, region_start: i64) -> String {
-    let mut hap: Vec<char> = refseq.clone().chars().collect();
+fn build_haplotypes(haplotype: &Vec<Var>, refseq: &str, region_start: i64) -> String {
+    let mut hap: Vec<char> = refseq.chars().collect();
     for v in haplotype {
         match v.vt {
             VarType::Snv => {

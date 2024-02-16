@@ -8,6 +8,7 @@ keywords = ["variant-calling", "inheritance", "genetics"]
 repository = "https://github.com/PacificBiosciences/PlatinumPedigree"
 categories = ["science", "algorithms", "command-line-utilities"]
 readme = "../../README.md"
+license-file = "../../LICENSE.md"
 
 [[bin]]
 name = "concordance"
