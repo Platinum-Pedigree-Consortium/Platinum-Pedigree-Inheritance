@@ -1,7 +1,7 @@
 [package]
 name = "concordance"
 version = "0.1.0"
-authors = [ "Zev Kronenberg <zkronenberg@pacificbiosciences.com>"]
+authors = [ "Zev Kronenberg <zkronenberg@pacificbiosciences.com>", "Daniel Baker <dbaker@pacificbiosciences.com>"]
 description = "Filter and report variant counts"
 edition = "2021"
 keywords = ["variant-calling", "inheritance", "genetics"]
