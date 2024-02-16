@@ -60,7 +60,7 @@ impl std::str::FromStr for Category {
 ///
 ///
 ///```
-/// use concordance::gfa::Line;
+/// use concordance::rgfa::Line;
 /// use std::str::FromStr;
 /// let line = Line::from_str("S\tS1\tACGT\tAC:Z:0").expect("Failed to parse line");
 /// eprintln!("Line: {line}");
@@ -309,7 +309,7 @@ pub struct File {
 }
 
 impl File {
-    /// Build `gfa::File` from a type implementing `std::io::Read`
+    /// Build `rgfa::File` from a type implementing `std::io::Read`
     ///
     /// # Errors
     /// 1. Lines not valid UTF-8.
@@ -360,7 +360,7 @@ impl File {
         })
     }
 
-    /// Build `gfa::File` from a `Path`.
+    /// Build `rgfa::File` from a `Path`.
     ///
     /// # Errors
     /// 1. File does not exist.
@@ -433,8 +433,8 @@ impl Orientation {
 
 ///
 ///```
-/// use concordance::gfa::decompose_walk;
-/// let result = decompose_walk(">s1000<s3000");
+/// use concordance::rgfa::decompose_walk;
+/// let result = decompose_walk(">s1000<s3000").unwrap();
 /// assert_eq!(result[0].1, "s1000");
 /// assert_eq!(result[1].1, "s3000");
 ///```
