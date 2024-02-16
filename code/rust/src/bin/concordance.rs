@@ -155,8 +155,7 @@ fn parse_inht(inht_fn: String) -> Vec<InheritanceBlock> {
 
         let mut one_parent = false;
 
-        let mut sidx: usize = 0;
-        for i in 3..header.len() {
+        for (sidx, i) in (3..header.len()).enumerate() {
             // Some inheritance vectors do not contain both parental marker, for example you might see `A` rather than `AB`.
             // We want to skip these sites as the expected genotypes are unknown.
             if record.as_ref().unwrap()[i].to_string().len() == 1 {
@@ -165,7 +164,6 @@ fn parse_inht(inht_fn: String) -> Vec<InheritanceBlock> {
             // putting the sample names in the header into the inheritance block for easy lookup
             ihtblock.sample_lookups.insert(header[i].to_string(), sidx);
             ihtblock.samples.push(header[i].to_string());
-            sidx += 1;
             // geno
             ihtblock
                 .parental_hap
@@ -194,14 +192,14 @@ fn header_to_idx(h: &HeaderView) -> HashMap<String, usize> {
 }
 
 fn get_iht_block<'a>(
-    ihts: &'a Vec<InheritanceBlock>,
+    ihts: &'a [InheritanceBlock],
     chr: &str,
     pos: i32,
     current: &mut usize,
 ) -> Option<&'a InheritanceBlock> {
-    for i in *current..ihts.len() {
-        if (ihts[i].chrom == chr) && (pos >= ihts[i].start) && (pos <= ihts[i].end) {
-            return Some(&ihts[i]);
+    for item in ihts.iter().skip(*current) {
+        if (item.chrom == chr) && (pos >= item.start) && (pos <= item.end) {
+            return Some(item);
         }
         *current += 1;
     }
@@ -236,7 +234,7 @@ fn main() {
     let mut passed: i64 = 0;
     let mut fail_counts: HashMap<String, i64> = HashMap::new();
 
-    for (_i, record_result) in bcf.records().enumerate() {
+    for record_result in bcf.records() {
         let mut record = record_result.expect("Fail to read record");
         // only looking at bi-allelic sites
         if record.alleles().len() != 2 {
