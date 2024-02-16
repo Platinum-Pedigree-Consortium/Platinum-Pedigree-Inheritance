@@ -1,6 +1,6 @@
 [package]
 name = "concordance"
-version = "0.1.0"
+version = "0.1.1"
 authors = [ "Zev Kronenberg <zkronenberg@pacificbiosciences.com>", "Daniel Baker <dbaker@pacificbiosciences.com>"]
 description = "Filter and report variant counts"
 edition = "2021"
