@@ -22,6 +22,8 @@ def get_alleles(vcf_path):
             sl = line.split()
             ref, alts = sl[3], sl[4]
             locus = sl[7].split(";")[0].replace("TRID=", "")
+            motifs = sl[7].split(";")[2].replace("MOTIFS=", "").replace(",", "-")
+            locus = f"{locus}_{motifs}"
             if len(sl) <= 9:
                 assert False, sl
                 continue
@@ -77,7 +79,8 @@ def create_allele_db(manifest, db_path, sort_threads=1):
         for sample, vcf_path in manifest.items():
             for trid, alleles, tags in get_alleles(vcf_path):
                 alleles = ",".join(alleles)
-                file.write(f"{trid}\t{sample}\t{alleles}\n".encode("utf-8"))
+                ap = tags["AP"]
+                file.write(f"{trid}\t{sample}\t{alleles}\t{ap}\n".encode("utf-8"))
 
     db_stream = subprocess.Popen(["gunzip", "-c", db_path], stdout=subprocess.PIPE)
     sort_stream = subprocess.Popen(
