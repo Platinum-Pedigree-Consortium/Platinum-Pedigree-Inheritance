@@ -463,6 +463,13 @@ if __name__ == "__main__":
         required=True,
     )
     parser.add_argument(
+        "-o",
+        "--out_path",
+        type=Path,
+        help="Output file to write merged SV calls to.",
+        required=True,
+    )
+    parser.add_argument(
         "-l",
         "--log_level",
         type=str,
@@ -544,7 +551,7 @@ if __name__ == "__main__":
     write_vcf(
         primary_it_map,
         vcf_map[sv_order_list[0].lower()],
-        "/Users/tmokveld/git/scratch_bb/python/notebooks/PLD_SVs/src/tmp.vcf",
+        args.out_path,
         sv_order_list,
         args.flank_len,
     )
