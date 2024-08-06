@@ -41,3 +41,15 @@ def get_rec(vcf_path):
                     allele = TrAllele(seq, ap, am)
                     gts[sample].append(allele)
             yield JointRec(trid, locus, motifs, gts)
+
+
+def subset(input_vcf, output_vcf, trids_to_keep):
+    with gzip.open(input_vcf, "rb") as infile, gzip.open(output_vcf, "wb") as outfile:
+            for line in infile:
+                if chr(line[0]) != "#":
+                    sl = line.decode("ascii").split()
+                    trid = sl[7].split(";")[0].replace("TRID=", "")
+                    if trid not in trids_to_keep:
+                        continue
+                outfile.write(line)
+
