@@ -1,0 +1,10 @@
+name: gnugrep
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - grep=3.4=h9d38fda_4
+  - libcxx=18.1.8=hd876a4e_6
+  - pcre=8.45=he49afe7_0
+prefix: /Users/cillian/miniconda/envs/gnugrep

@@ -1,0 +1,36 @@
+CALLER = ["sawfish", "pav", "pggb", "sniffles_ont"]
+
+def _get_vcf(wildcards):
+    return config["samples"][wildcards.caller]
+
+def _get_odd(wildcards):
+    return config["odd"]
+
+def _get_gaps(wildcards):
+    return config["gaps"]
+
+rule collect:
+    input: expand("ped_filtered/{caller}.pedfilt.vcf", caller=CALLER)
+
+rule pedfilter:
+    input: bin=config['concordance'], vcf="pre_filtered/{caller}.prefilt.vcf", inheritance=config['inheritance']
+    output: "ped_filtered/{caller}.pedfilt.vcf"
+    shell: """
+        cd ped_filtered ; {input.bin} --father NA12877 --mother NA12878 --vcf ../{input.vcf} --inheritance {input.inheritance} --prefix {wildcards.caller}.pedfilt > {wildcards.caller}.pedfilt.out
+    """
+
+rule prefilter:
+    input: vcf=_get_vcf, odd=_get_odd, gaps=_get_gaps
+    output: "pre_filtered/{caller}.prefilt.vcf"
+    shell: """
+        sed '/^##/! s/|/\//g' {input.vcf} > pre_filtered/{wildcards.caller}.nophase.vcf
+        bgzip pre_filtered/{wildcards.caller}.nophase.vcf
+        tabix -p vcf  pre_filtered/{wildcards.caller}.nophase.vcf.gz
+        bcftools view -O z --trim-alt-alleles --samples NA12879,NA12881,NA12882,NA12883,NA12884,NA12885,NA12886,NA12887,NA12877,NA12878 --regions chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22,chrX pre_filtered/{wildcards.caller}.nophase.vcf.gz |  \
+        bcftools view -i '(INFO/SVLEN < -49 || INFO/SVLEN > 49)' -  | \
+        bcftools view -i '(INFO/SVLEN > -100001 && INFO/SVLEN < 100001)' -  | \
+        bcftools +fill-tags - | \
+        bcftools view -i '(AC > 0)' - | \
+        bedtools subtract -header -a - -b {input.odd} | \
+        bedtools subtract -header -a - -b {input.gaps} > {output}
+    """

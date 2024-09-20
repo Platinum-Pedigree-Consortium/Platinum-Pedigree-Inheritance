@@ -1,0 +1,10 @@
+{
+    "inheritance": "/home/zkronenberg/tools/palladium-genomes/pipelines/data/ceph.GRCh38.viterbi.csv",
+    "concordance": "/home/zkronenberg/tools/PlatinumPedigree/code/rust/target/release/concordance",
+    "samples": {
+        "pbsv": "/pbi/vast-collections/palladium_genomes/zk_analysis/pbsv/joint/g2g3.pbsv.vcf",
+        "sniffles": "/dept/bifx/kpin/downstream/variants_calling/2023-9-8_Palladium_Sniffles/joint-call.vcf",
+        "sawfish": "/pbi/vast-collections/palladium_genomes/zk_analysis/sawfish/genotyped.sv.pass.ge50.gq40.vcf",
+        "pav": "/pbi/vast-collections/palladium_genomes/data/variants/pav/GRCh38/verkko/K1463_pav-verkko.vcf",
+    }
+}

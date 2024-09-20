@@ -1,0 +1,41 @@
+{
+    "todo": [
+        "hg38"
+    ],
+    "chm13": {
+        "ilmn": "/pbi/vast-collections/palladium_genomes/zk_analysis/chm13_inheritance/CEPH1463.CHM13.deepvariant.glnexus.vcf",
+        "hifi": "/pbi/vast-collections/palladium_genomes/zk_analysis/chm13_inheritance/platinum-t2t.glnexus.anno.bcf",
+        "vec_ilmn": "data/ceph_chm13.hifi.G3.10_snp_support.hifi_hifi.csv",
+        "vec_hifi": "data/ceph_chm13.hifi.G3.10_snp_support.hifi_hifi.csv"
+    },
+    "hg38": {
+        "clair3-ont": "/pbi/vast-collections/palladium_genomes/zk_analysis/pre_selected_no_g4/ont_joint_g2g3.vcf",
+        "dv-ilmn": "/pbi/vast-collections/palladium_genomes/zk_analysis/pre_selected_no_g4/ilmn_joint_g2g3.vcf",
+        "dv-hifi": "/pbi/vast-collections/palladium_genomes/zk_analysis/pre_selected_no_g4/hifi_joint_g2g3.vcf",
+        "pav-assembly": "/pbi/vast-collections/palladium_genomes/zk_analysis/pre_selected_no_g4/pav_joint_g2g3.vcf",
+        "dragen-ilmn": "/pbi/vast-collections/palladium_genomes/zk_analysis/pre_selected_no_g4/ilmn_dragen_g2g3.vcf",
+        "clair3-hifi": "/pbi/vast-collections/palladium_genomes/zk_analysis/pre_selected_no_g4/hifi_clair3_g2g3.vcf",
+        "dnascope-hifi": "/pbi/vast-collections/palladium_genomes/zk_analysis/pre_selected_no_g4/hifi_dnascope_g2g3.vcf",
+        "seq": "/pbi/flash/100humans/data/dataset/GRCh38/human_GRCh38_no_alt_analysis_set.fasta",
+        "vec_dv-ilmn": "/home/zkronenberg/tools/palladium-genomes/pipelines/data/ceph.GRCh38.viterbi.csv",
+        "vec_dv-hifi": "/home/zkronenberg/tools/palladium-genomes/pipelines/data/ceph.GRCh38.viterbi.csv",
+        "vec_clair3-hifi": "/home/zkronenberg/tools/palladium-genomes/pipelines/data/ceph.GRCh38.viterbi.csv",
+        "vec_dragen-ilmn": "/home/zkronenberg/tools/palladium-genomes/pipelines/data/ceph.GRCh38.viterbi.csv",
+        "vec_clair3-ont": "/home/zkronenberg/tools/palladium-genomes/pipelines/data/ceph.GRCh38.viterbi.csv",
+        "vec_dnascope-hifi": "/home/zkronenberg/tools/palladium-genomes/pipelines/data/ceph.GRCh38.viterbi.csv",
+        "vec_pav-assembly": "/home/zkronenberg/tools/palladium-genomes/pipelines/data/ceph.GRCh38.viterbi.csv",
+        "1mb_win": "/home/zkronenberg/tools/palladium-genomes/pipelines/data/1mb-ref-GRCh38-windows.bed",
+        "hq_regions": "/home/zkronenberg/zk/palladium_genomes/zk_analysis/platinum-pedigree-small-variants-feb22-24/aux-files/high_confidence_regions.simple.bed",
+        "odd_regions": "/pbi/vast-collections/palladium_genomes/zk_analysis/platinum-pedigree-small-variants-feb22-24/aux-files/GRCh38.oddRegions.bed.gz"
+    },
+    "concordance": "/home/zkronenberg/tools/PlatinumPedigree/code/rust/target/release/concordance",
+    "mash": "/home/zkronenberg/tools/PlatinumPedigree/code/rust/target/release/mash2vcf",
+    "resolver": "/home/zkronenberg/tools/PlatinumPedigree/code/rust/target/release/resolver",
+    "ovlfilter": "/home/zkronenberg/tools/PlatinumPedigree/code/rust/target/release/ovlfilter",
+    "regions_for_resolver": "/pbi/vast-collections/palladium_genomes/zk_analysis/platinum-pedigree-small-variants-feb22-24/aux-files/2mbindows1mstep.regions.txt",
+    "2kwindows": "/pbi/vast-collections/palladium_genomes/zk_analysis/platinum-pedigree-small-variants-feb22-24/aux-files/2kwindows1kstep.bed",
+    "NA12878_1": "/pbi/vast-collections/palladium_genomes/data/assemblies/NA12878/verkko/1.3.1/assembly.haplotype1.fasta",
+    "NA12878_2": "/pbi/vast-collections/palladium_genomes/data/assemblies/NA12878/verkko/1.3.1/assembly.haplotype2.fasta",
+    "NA12877_1": "/pbi/vast-collections/palladium_genomes/data/assemblies/NA12877/verkko/1.4.1/assembly.haplotype1.fasta",
+    "NA12877_2": "/pbi/vast-collections/palladium_genomes/data/assemblies/NA12877/verkko/1.4.1/assembly.haplotype2.fasta"
+}

@@ -1,0 +1,27 @@
+  [
+    {
+     "caller": "sawfish",
+     "path": "/.../sawfish.pedfilt.vcf",
+     "prefix_tag": "sawfish"
+   },
+   {
+     "caller": "pbsv",
+     "path": "/.../pbsv.pedfilt.vcf",
+     "prefix_tag": "pbsv"
+   },
+   {
+     "caller": "sniffles",
+     "path": "/.../sniffles_ont.pedfilt.vcf",
+     "prefix_tag": "ONT"
+   },
+   {
+     "caller": "sniffles",
+     "path": "/.../sniffles.pedfilt.vcf",
+     "prefix_tag": "HiFi"
+   },
+   {
+     "caller": "pav",
+     "path": "/.../pav.pedfilt.vcf",
+     "prefix_tag": ""
+   }
+ ]

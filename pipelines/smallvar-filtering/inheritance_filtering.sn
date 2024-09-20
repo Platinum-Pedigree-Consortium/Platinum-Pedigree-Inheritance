@@ -1,0 +1,237 @@
+REF  = "hg38"
+TECH = ["dv-hifi", "clair3-hifi", "dv-ilmn", "dragen-ilmn", "clair3-ont"]
+
+def _get_vec(wildcards):
+    return config[wildcards.ref]["vec_{tech}".format(tech = wildcards.tech)]
+
+def _get_vcf(wildcards):
+    return config[wildcards.ref][wildcards.tech]
+
+def _get_genome(wildcards):
+    return config[wildcards.ref]["seq"]
+
+def _get_win(wildcards):
+    return config[wildcards.ref]["1mb_win"]
+
+def _get_hq(wildcards):
+    return config[wildcards.ref]["hq_regions"]
+
+def _get_missing_haps(wildcards):
+    return config[wildcards.ref]["missing"]
+
+def _get_odd(wildcards):
+    return config[wildcards.ref]["odd_regions"]
+
+def _get_svs(wildcards):
+    return config[wildcards.ref]["svs"]
+
+def _get_hap(wildcards):
+    config_lookup = "{parent}_{hap}".format(parent=wildcards.parent, hap=wildcards.hap)
+    return config[config_lookup]
+
+
+rule gather:
+    input: expand("filtering/{ref}_{tech}.normalized.pedigree_filtered.counts", ref=REF, tech=TECH),
+     expand("merged_truth/{ref}/palladium_merged_techs.bcf", ref=REF),
+     expand("merged_truth/{ref}/all_variants.bed", ref=REF),
+     expand("merged_truth/{ref}/all_variants_passing.bed", ref=REF),
+     expand("merged_truth/{ref}/hq_regions_final.bed",  ref=REF),
+     expand("merged_truth/{ref}/ceph_small_variant_g2g3_hq.vcf.gz", ref=REF),
+     expand("merged_truth/{ref}/{parent}_resolver.haps.fasta",ref=REF, parent=["NA12878", "NA12877"]),
+     expand("merged_truth/{ref}/{parent}_merged.paf", ref=REF, parent=["NA12878", "NA12877"]),
+     expand("merged_truth/{ref}/{parent}.var_anno.json", ref=REF, parent=["NA12878", "NA12877"]),
+     expand("merged_truth/{ref}/NA12878_hq_truthset.vcf.gz", ref=REF)
+
+rule NA12878_get:
+    input: "merged_truth/{ref}/ceph_small_variant_g2g3_hq.vcf.gz"
+    output: "merged_truth/{ref}/NA12878_hq_truthset.vcf.gz"
+    shell: """
+        bcftools view -s NA12878 {input} | bcftools view -O z -i 'GT[*]="alt"' > {output}
+        tabix -p vcf {output}
+    """
+
+rule intersect_vars_and_hq:
+    input: hq="merged_truth/{ref}/hq_regions_final.bed", vcf="merged_truth/{ref}/ceph_small_variant_g2g3_nolarge_indels.vcf.gz"
+    output: "merged_truth/{ref}/ceph_small_variant_g2g3_hq.vcf.gz"
+    shell: """
+        bedtools intersect -header -a {input.vcf} -b {input.hq} > merged_truth/{wildcards.ref}/ceph_small_variant_g2g3_hq.vcf
+        bgzip merged_truth/{wildcards.ref}/ceph_small_variant_g2g3_hq.vcf
+        tabix -p vcf merged_truth/{wildcards.ref}/ceph_small_variant_g2g3_hq.vcf.gz
+    """
+
+rule remove_fails_anno:
+    input: hq="merged_truth/{ref}/hq_regions.bed",  fails="merged_truth/{ref}/ceph_small_variant_g2g3.fail.bed", large_indels="merged_truth/{ref}/large_indels.bed", odd=_get_odd, ovl_vars="merged_truth/{ref}/merged_resolver.ovl.bed", svs=_get_svs, missing_haps=_get_missing_haps
+    output: "merged_truth/{ref}/hq_regions_final.bed"
+    shell: """
+        bedtools subtract -a {input.hq} -b {input.fails} | \
+        bedtools subtract -a - -b {input.odd} | \
+        bedtools subtract -a - -b {input.large_indels} | \
+        bedtools subtract -a - -b {input.svs} | \
+        bedtools subtract -a - -b {input.ovl_vars} | \
+        bedtools subtract -a - -b {input.missing_haps} > {output}
+    """
+
+rule merge_ovls:
+    input:  ovls=expand("merged_truth/{{ref}}/{parent}_resolver.ovls.bed", parent=["NA12878", "NA12877"]), vcf="merged_truth/{ref}/ceph_small_variant_g2g3_nolarge_indels.vcf.gz"
+    output: "merged_truth/{ref}/merged_resolver.ovl.bed"
+    shell: """
+        bcftools +remove-overlaps --print-overlaps {input.vcf} | bcftools query -f '%CHROM\\t%POS0\\t%END\\n' > bcftools_ovl.bed
+         cat {input.ovls} bcftools_ovl.bed | grep -v "#" | sort -k1,1 -k2,2n | bedtools merge -i - > {output}
+    """
+
+rule remove_large_indels:
+    input: "merged_truth/{ref}/ceph_small_variant_g2g3.vcf.gz"
+    output: "merged_truth/{ref}/large_indels.bed", "merged_truth/{ref}/ceph_small_variant_g2g3_nolarge_indels.vcf.gz"
+    shell: """
+        bcftools view -i 'ILEN < -50 || ILEN > 50' {input} | bcftools query -f '%CHROM\\t%POS0\\t%END\\n' - > {output[0]}
+        bcftools view -i '(ILEN > -51 && ILEN < 51 || type="snp")' -O z {input} > {output[1]}
+        tabix -p vcf {output[1]}
+    """
+
+rule ovl_filter:
+    input: ovlfilter=config['ovlfilter'], paf="merged_truth/{ref}/{parent}_merged.paf", json="merged_truth/{ref}/{parent}_resolver.variants.json"
+    output: "merged_truth/{ref}/{parent}.var_anno.json"
+    shell: """
+        {input.ovlfilter} --aln {input.paf} --json {input.json} --prefix merged_truth/{wildcards.ref}/{wildcards.parent}
+    """
+
+rule merge_haps:
+    input: expand("merged_truth/{{ref}}/{{parent}}_{hap}.paf", hap=[1,2])
+    output: "merged_truth/{ref}/{parent}_merged.paf"
+    shell: """
+        cat {input} > {output}
+    """
+
+rule aln_haps:
+    input: asm=_get_hap, hap="merged_truth/{ref}/{parent}_resolver.haps.fasta"
+    output: "merged_truth/{ref}/{parent}_{hap}.paf"
+    shell: """
+        minimap2 -c -x asm5 --eqx {input.asm} {input.hap}  {input.hap} > {output}
+    """
+
+rule build_overlap_haplotypes:
+    input: vcf="merged_truth/{ref}/ceph_small_variant_g2g3_nolarge_indels.vcf.gz", ref=_get_genome, regions="merged_truth/{ref}/{parent}_to_resolve.regions", resolver=config['resolver']
+    output: "merged_truth/{ref}/{parent}_resolver.haps.fasta", "merged_truth/{ref}/{parent}_resolver.variants.json"
+    shell: """
+        {input.resolver} --fasta {input.ref} --vcf {input.vcf} --sample {wildcards.parent} --region {input.regions} --prefix merged_truth/{wildcards.ref}/{wildcards.parent}_resolver
+    """
+
+rule build_regions_to_resolve:
+    input: ovls="merged_truth/{ref}/{parent}_resolver.ovls.bed", genomic_regions=config['2kwindows']
+    output: "merged_truth/{ref}/{parent}_to_resolve.regions"
+    shell: """
+        bedtools intersect -c -a {input.genomic_regions} -b {input.ovls} | perl -lane 'print if $F[-1] > 0' | perl -lane 'print "$F[0]:$F[1]-$F[2]"' > {output}
+    """
+
+rule identify_overlaps:
+    input: vcf="merged_truth/{ref}/ceph_small_variant_g2g3.vcf.gz", ref=_get_genome, region_fn=config['regions_for_resolver'], resolver=config['resolver']
+    output: "merged_truth/{ref}/{parent}_resolver.ovls.txt", "merged_truth/{ref}/{parent}_resolver.ovls.bed"
+    shell: """
+        {input.resolver} --fasta {input.ref} --vcf {input.vcf} --sample {wildcards.parent} --region {input.region_fn} --prefix merged_truth/{wildcards.ref}/{wildcards.parent}_resolver -d
+        sort merged_truth/{wildcards.ref}/{wildcards.parent}_resolver.ovls.txt | perl -lane '$start = $F[1] - 10; $end = $F[1] + 10; print "$F[0]\\t$start\\t$end"' | sort | uniq  > merged_truth/{wildcards.ref}/{wildcards.parent}_resolver.ovls.bed
+    """
+
+rule prep_compressed_vcf:
+    input: vcf="merged_truth/{ref}/ceph_small_variant_g2g3.vcf"
+    output: "merged_truth/{ref}/ceph_small_variant_g2g3.vcf.gz"
+    shell: """
+        bcftools view -f 'PASS' -O b {input} |  bcftools sort -O z -o {output}
+        bcftools index {output[0]}
+    """
+
+rule create_vcf:
+    input: mash=config['mash'], data="merged_truth/{ref}/mashed.txt", ref=_get_genome
+    output: "merged_truth/{ref}/ceph_small_variant_g2g3.vcf", "merged_truth/{ref}/ceph_small_variant_g2g3.fail.bed"
+    shell: """
+        {input.mash} --fai {input.ref}.fai --mashed {input.data} --samples NA12879,NA12881,NA12882,NA12883,NA12884,NA12885,NA12886,NA12887,NA12877,NA12878 --prefix merged_truth/{wildcards.ref}/ceph_small_variant_g2g3 --ik clair3-hifi,clair3-ont,dnascope-hifi,dragen-ilmn,dv-hifi,dv-ilmn,pav-assembly
+    """
+
+rule merge_n_mash:
+    input: expand("merged_truth/{{ref}}/{tech}.normalized.pedigree_filtering.tagged.sites", tech=TECH)
+    output: "merged_truth/{ref}/mashed.txt"
+    shell:  """
+        cat {input} | sort -k1,1 | datamash -g 1 collapse 2,3 > {output}
+    """
+
+rule tag_sites:
+    input: sites="filtering/{ref}_{tech}.normalized.pedigree_filtering.sites"
+    output: "merged_truth/{ref}/{tech}.normalized.pedigree_filtering.tagged.sites"
+    shell: """
+        perl -lane 'print "$_\\t{wildcards.tech}"' {input} > {output}
+    """
+
+rule count:
+    input: "filtering/{ref}_{tech}.normalized.pedigree_filtered_sorted.bcf"
+    output: "filtering/{ref}_{tech}.normalized.pedigree_filtered.counts"
+    shell: """
+        bcftools +counts {input} > {output}
+    """
+
+rule win_count:
+    input: bcf="filtering/{ref}_{tech}.normalized.pedigree_filtered_sorted.bcf", win=_get_win
+    output: "filtering/{ref}_{tech}.normalized.pedigree_filtered_counts.bed"
+    shell: """
+        bcftools view {input.bcf} > {wildcards.ref}_{wildcards.tech}.normalized.pedigree_filtered_sorted.vcf
+        bedtools intersect -c -a {input.win} -b {wildcards.ref}_{wildcards.tech}.normalized.pedigree_filtered_sorted.vcf > {output}
+    """
+
+rule refine_hq_regions:
+    input: ped_var="merged_truth/{ref}/all_variants_passing.bed", novar="merged_truth/{ref}/hq_regions_no_vars.bed", hq=_get_hq
+    output: "merged_truth/{ref}/hq_regions.bed"
+    shell: """
+        cat {input.ped_var} {input.novar}  | sort -k1,1 -k2,2n | bedtools merge -i - | bedtools intersect -a - -b {input.hq} > {output}
+    """
+
+rule make_tpvar_bed:
+    input: bcf="merged_truth/{ref}/ceph_small_variant_g2g3.vcf.gz", genome=_get_genome
+    output: "merged_truth/{ref}/all_variants_passing.bed"
+    shell: """
+        bcftools query -f '%CHROM\\t%POS0\\t%END\\n' {input.bcf}  > {output}
+    """
+
+rule merge_filtered:
+    input: expand("filtering/{{ref}}_{tech}.normalized.pedigree_filtered_sorted.bcf", tech=TECH)
+    output: "merged_truth/{ref}/palladium_merged_techs.bcf"
+    shell: """
+        bcftools concat -O b -a -d all {input} > {output}
+    """
+
+rule pedigree_filter:
+     input: con=config['concordance'], bcf="filtering/{ref}_{tech}.normalized.sorted.bcf", vector=_get_vec
+     output: "filtering/{ref}_{tech}.normalized.pedigree_filtered_sorted.bcf", "filtering/{ref}_{tech}.normalized.pedigree_filtering.sites"
+     shell: """
+            {input.con} --father NA12877 --mother NA12878 -i {input.vector} -v {input.bcf} -p filtering/{wildcards.ref}_{wildcards.tech}.normalized_pedigree_filtered > filtering/{wildcards.ref}_{wildcards.tech}.normalized.pedigree_filtering.info.out
+            bcftools sort --output-type b filtering/{wildcards.ref}_{wildcards.tech}.normalized_pedigree_filtered.vcf > {output[0]}
+            bcftools index {output[0]}
+            bcftools query -f '%CHROM:%POS0:%END:%REF:%ALT\t[%GT:]\n' {output[0]} > {output[1]}
+     """
+
+rule subtract_all_vars_hq:
+    input: hq=_get_hq, vars="merged_truth/{ref}/all_variants.bed"
+    output: "merged_truth/{ref}/hq_regions_no_vars.bed"
+    shell: """
+        bedtools subtract -a {input.hq} -b {input.vars} > {output}
+    """
+
+rule merge_beds:
+    input: expand( "filtering/{{ref}}_{tech}.normalized.sorted.bed",  tech=TECH)
+    output: "merged_truth/{ref}/all_variants.bed"
+    shell: """
+        cat {input}  |  sort -k1,1 -k2,2n  > {output}
+    """
+
+rule make_beds:
+    input:  bcf="filtering/{ref}_{tech}.normalized.sorted.bcf"
+    output: "filtering/{ref}_{tech}.normalized.sorted.bed"
+    shell: """
+        bcftools query -f '%CHROM\\t%POS0\\t%END\\t{wildcards.tech}\\n' {input}  > {output}
+    """
+         
+rule norm:
+    input:  vcf=_get_vcf, genome=_get_genome
+    output: "filtering/{ref}_{tech}.normalized.sorted.bcf"
+    threads: 8
+    shell: """
+        bcftools view  --output-type b {input.vcf} | bcftools norm --threads {threads} --output-type b --fasta-ref {input.genome} - | bcftools sort --output-type b -o {output}
+        bcftools index {output}
+    """

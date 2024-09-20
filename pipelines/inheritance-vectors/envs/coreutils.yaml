@@ -1,0 +1,19 @@
+name: coreutils
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - coreutils=9.5=h10d778d_0
+  - gettext=0.22.5=hdfe23c8_3
+  - gettext-tools=0.22.5=hdfe23c8_3
+  - libasprintf=0.22.5=hdfe23c8_3
+  - libasprintf-devel=0.22.5=hdfe23c8_3
+  - libcxx=18.1.8=hd876a4e_6
+  - libgettextpo=0.22.5=hdfe23c8_3
+  - libgettextpo-devel=0.22.5=hdfe23c8_3
+  - libiconv=1.17=hd75f5a5_2
+  - libintl=0.22.5=hdfe23c8_3
+  - libintl-devel=0.22.5=hdfe23c8_3
+  - sed=4.7=h3efe00b_1000
+prefix: /Users/cillian/miniconda/envs/coreutils
