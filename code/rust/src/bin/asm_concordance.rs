@@ -8,14 +8,22 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 
+use concordance::iht;
+use concordance::iht::InheritanceBlock;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 
 struct Args {
+    /// A formatted region string, e.g chr1:0-1000
     #[arg(short, long)]
     region: String,
+    /// A json file containing a path to the aligned bam files
     #[arg(short, long)]
     samples: String,
+    /// CSV containing the inheritance vectors (optionally gzipped)
+    #[arg(short, long)]
+    inheritance: String,
 }
 #[derive(Deserialize, Debug)]
 
@@ -121,7 +129,7 @@ fn bam_to_fasta(
     region: &str,
     flag: u16,
     flip_rc: bool,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(Vec<FastaEntry>), Box<dyn Error>> {
     let mut bam = IndexedReader::from_path(in_bam)?;
 
     // Parse the region
@@ -152,13 +160,10 @@ fn bam_to_fasta(
 
     for r in bam.records() {
         let record = r.unwrap();
-        println!("{:?} {}", record, record.flags());
 
         // Map target region to query region (read coordinates)
         let cigar = record.cigar();
         let qpos = target_to_query(&cigar, record.pos(), t_start, t_end);
-
-        println!("q pos: {:?}", qpos);
 
         // Extract the subsequence within the query region
         let seq = record.seq().as_bytes();
@@ -188,16 +193,7 @@ fn bam_to_fasta(
     // Sort fasta entries by strand
     fasta_entries.sort_by(my_cmp);
 
-    // Output the fasta entries
-    for entry in fasta_entries {
-        println!(
-            ">{} len:{} strand:{}",
-            entry.name, entry.length, entry.strand
-        );
-        println!("{}", entry.seq);
-    }
-
-    Ok(())
+    Ok((fasta_entries))
 }
 
 // Reverse complement function for DNA sequences
@@ -220,18 +216,35 @@ fn main() {
     let args = Args::parse();
     let region = args.region;
 
+    // Load up the inheritance vectors
+    let mut inheritance = iht::parse_inht(args.inheritance);
+
     // Read the JSON file into a string
     let json_data = fs::read_to_string(args.samples).unwrap();
 
     // Parse the JSON string
     let sample_info: HashMap<String, Assembly> = serde_json::from_str(&json_data).unwrap();
 
+    let mut loaded_haps: HashMap<String, (String, String)> = HashMap::new();
+
     for sample in sample_info {
-        if let Err(e) = bam_to_fasta(&sample.1.hap1, &region, flag, flip_rc) {
-            eprintln!("Error: {}", e);
+        let h1 = bam_to_fasta(&sample.1.hap1, &region, flag, flip_rc).unwrap();
+        let h2 = bam_to_fasta(&sample.1.hap2, &region, flag, flip_rc).unwrap();
+
+        let mut h1_str = "".to_string();
+        if h1.len() == 1 {
+            h1_str = h1.get(0).unwrap().seq.clone();
         }
-        if let Err(e) = bam_to_fasta(&sample.1.hap2, &region, flag, flip_rc) {
-            eprintln!("Error: {}", e);
+
+        let mut h2_str = "".to_string();
+        if h2.len() == 1 {
+            h2_str = h2.get(0).unwrap().seq.clone();
         }
+
+        loaded_haps.insert(sample.0.clone(), (h1_str, h2_str));
+    }
+
+    for person in loaded_haps {
+        println!("{} {:?}", person.0, person.1);
     }
 }
