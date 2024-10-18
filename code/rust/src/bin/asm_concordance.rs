@@ -5,11 +5,17 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::error;
 use std::error::Error;
+use std::fmt;
 use std::fs;
 
+use concordance::bed;
+use concordance::bed::BedRecord;
 use concordance::iht;
 use concordance::iht::InheritanceBlock;
+
+type Result<T> = std::result::Result<T, Box<dyn error::Error>>;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -39,13 +45,32 @@ struct Assembly {
     hap2: String,
 }
 
+#[derive(Deserialize, Debug)]
+
 struct Region {
     seqid: String,
     start: i64,
     end: i64,
 }
+
+impl From<BedRecord> for Region {
+    fn from(bed_record: BedRecord) -> Self {
+        Region {
+            seqid: bed_record.chrom,
+            start: bed_record.start as i64, // Convert u64 to i64
+            end: bed_record.end as i64,     // Convert u64 to i64
+        }
+    }
+}
+
+impl std::fmt::Display for Region {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}\t{}\t{}", self.seqid, self.start, self.end)
+    }
+}
+
 impl Region {
-    fn parse_region(region_str: &String) -> Result<Region, Box<dyn Error>> {
+    fn parse_region(region_str: &String) -> Result<Region> {
         // Parse the region
         let region_parts: Vec<&str> = region_str.split(':').collect();
         if region_parts.len() != 2 {
@@ -162,13 +187,11 @@ fn my_cmp(x: &FastaEntry, y: &FastaEntry) -> Ordering {
 
 // Function to extract sequences from BAM, trim to target region, and optionally reverse complement
 fn bam_to_fasta(
-    in_bam: &str,
+    bam: &mut IndexedReader,
     region: &Region,
     flag: u16,
     flip_rc: bool,
-) -> Result<Vec<FastaEntry>, Box<dyn Error>> {
-    let mut bam = IndexedReader::from_path(in_bam)?;
-
+) -> Result<Vec<FastaEntry>> {
     // Get reference sequence ID for chromosome name
     let tid = bam
         .header()
@@ -212,10 +235,17 @@ fn bam_to_fasta(
         });
     }
 
+    if fasta_entries.len() > 1 {
+        return Err("Too many haplotypes".into());
+    }
+    if fasta_entries.len() < 1 {
+        return Err("Too few haplotypes".into());
+    }
+
     // Sort fasta entries by strand
     fasta_entries.sort_by(my_cmp);
 
-    Ok(fasta_entries)
+    return Ok(fasta_entries);
 }
 
 // Reverse complement function for DNA sequences
@@ -239,7 +269,6 @@ fn test_concordance(
     father: &String,
 ) -> bool {
     for i in 1..5 {
-        println!("{} ", i);
         let mut lookup: HashMap<char, String> = HashMap::new();
         match i {
             1 => {
@@ -269,6 +298,9 @@ fn test_concordance(
             _ => {}
         }
 
+        // A,B C,D
+        // AA,TC AA,TG
+
         let mut passing = 0;
         let mut total_count = 0;
 
@@ -296,7 +328,7 @@ fn test_concordance(
             if seen.0 == *expected.0 && seen.1 == *expected.1 {
                 passing += 1;
             }
-
+            /*
             println!(
                 "{:?} {:?} {} {} e:{:?} s:{:?} p:{}",
                 sample_name,
@@ -307,35 +339,47 @@ fn test_concordance(
                 seen,
                 passing
             );
+            */
         }
 
-        println!("n:{} passing:{}", total_count, passing);
+        if passing == total_count && total_count != 0 {
+            return true;
+        }
+
+        // println!("n:{} passing:{}", total_count, passing);
     }
 
     return false;
 }
 
-fn main() {
-    let flag = 260;
-    let flip_rc = false;
-    let args = Args::parse();
-    let region = Region::parse_region(&args.region).unwrap();
+fn open_bam_files(
+    fns: HashMap<String, Assembly>,
+) -> Result<HashMap<String, (IndexedReader, IndexedReader)>> {
+    let mut open_bh: HashMap<String, (IndexedReader, IndexedReader)> = HashMap::new();
 
-    // Load up the inheritance vectors
-    let mut inheritance = iht::parse_inht(args.inheritance);
-    let mut current_block_idx: usize = 0;
+    for s in fns {
+        open_bh.insert(
+            s.0,
+            (
+                IndexedReader::from_path(s.1.hap1).unwrap(),
+                IndexedReader::from_path(s.1.hap2).unwrap(),
+            ),
+        );
+    }
+    return Ok(open_bh);
+}
 
-    // Read the JSON file into a string
-    let json_data = fs::read_to_string(args.samples).unwrap();
-
-    // Parse the JSON string
-    let sample_info: HashMap<String, Assembly> = serde_json::from_str(&json_data).unwrap();
-
+fn fetch_haplotypes(
+    bams: &mut HashMap<String, (IndexedReader, IndexedReader)>,
+    region: &Region,
+    flag: u16,
+    flip_rc: bool,
+) -> Result<HashMap<String, (String, String)>> {
     let mut loaded_haps: HashMap<String, (String, String)> = HashMap::new();
 
-    for sample in sample_info {
-        let h1 = bam_to_fasta(&sample.1.hap1, &region, flag, flip_rc).unwrap();
-        let h2 = bam_to_fasta(&sample.1.hap2, &region, flag, flip_rc).unwrap();
+    for sample in bams {
+        let h1 = bam_to_fasta(&mut sample.1 .0, &region, flag, flip_rc).unwrap();
+        let h2 = bam_to_fasta(&mut sample.1 .1, &region, flag, flip_rc).unwrap();
 
         let mut h1_str = "".to_string();
         if h1.len() == 1 {
@@ -353,19 +397,49 @@ fn main() {
             loaded_haps.insert(sample.0.clone(), (h2_str, h1_str));
         }
     }
+    Ok(loaded_haps)
+}
 
-    let mut block = iht::get_iht_block(
-        &mut inheritance,
-        &region.seqid,
-        region.start.try_into().unwrap(),
-        &mut current_block_idx,
-    );
+fn main() {
+    let flag = 260;
+    let flip_rc = false;
+    let args = Args::parse();
 
-    // println!("\n{}\n", block.unwrap());
+    // Load up the inheritance vectors
+    let mut inheritance = iht::parse_inht(args.inheritance);
+    let mut current_block_idx: usize = 0;
 
-    test_concordance(&loaded_haps, block.unwrap(), &args.mother, &args.father);
+    // Read the JSON file into a string
+    let json_data = fs::read_to_string(args.samples).unwrap();
 
-    for person in loaded_haps {
-        println!("{} {:?}", person.0, person.1);
+    // Parse the JSON string
+    let sample_info: HashMap<String, Assembly> = serde_json::from_str(&json_data).unwrap();
+
+    // open bam files
+    let mut bams: HashMap<String, (IndexedReader, IndexedReader)> =
+        open_bam_files(sample_info).unwrap();
+
+    let bed_records = concordance::bed::read_bed_file(args.region).unwrap();
+
+    for region in bed_records {
+        let lr: Region = region.into();
+
+        let loaded_haps = fetch_haplotypes(&mut bams, &lr, 260 as u16, false);
+
+        let mut block = iht::get_iht_block(
+            &mut inheritance,
+            &lr.seqid,
+            lr.start.try_into().unwrap(),
+            &mut current_block_idx,
+        );
+
+        let concordant = test_concordance(
+            &loaded_haps.unwrap(),
+            block.unwrap(),
+            &args.mother,
+            &args.father,
+        );
+
+        println!("{}\t{}", lr, concordant);
     }
 }
