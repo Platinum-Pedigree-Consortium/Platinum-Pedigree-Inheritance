@@ -419,7 +419,6 @@ fn main() {
 
     // Load up the inheritance vectors
     let mut inheritance = iht::parse_inht(args.inheritance);
-    let mut current_block_idx: usize = 0;
 
     // Read the JSON file into a string
     let json_data = fs::read_to_string(args.samples).unwrap();
@@ -439,6 +438,7 @@ fn main() {
         let mut problems = (0, 0);
         let loaded_haps = fetch_haplotypes(&mut bams, &lr, 260 as u16, false, &mut problems);
 
+        let mut current_block_idx: usize = 0;
         let mut block = iht::get_iht_block(
             &mut inheritance,
             &lr.seqid,
