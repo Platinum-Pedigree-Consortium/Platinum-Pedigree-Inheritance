@@ -439,16 +439,32 @@ fn main() {
         let mut problems = (0, 0);
         let loaded_haps = fetch_haplotypes(&mut bams, &lr, 260 as u16, false, &mut problems);
 
-        if problems.0 > 0 || problems.1 > 0 {
-            println!("{}\t{}\t{}\t{}", lr, false, problems.0, problems.1);
-        }
-
         let mut block = iht::get_iht_block(
             &mut inheritance,
             &lr.seqid,
             lr.start.try_into().unwrap(),
             &mut current_block_idx,
         );
+
+        let mut failed_block = false;
+        match block {
+            None => {
+                println!(
+                    "Warning: skipping variant as it is not in a block {} {}",
+                    lr.seqid, lr.start
+                );
+                failed_block = true;
+            }
+            Some(_) => {}
+        }
+
+        if problems.0 > 0 || problems.1 > 0 || failed_block {
+            println!(
+                "{}\t{}\t{}\t{}\t{}",
+                lr, false, problems.0, problems.1, failed_block
+            );
+            continue;
+        }
 
         let concordant = test_concordance(
             &loaded_haps.unwrap(),
@@ -457,6 +473,6 @@ fn main() {
             &args.father,
         );
 
-        println!("{}\t{}\t0\t0", lr, concordant);
+        println!("{}\t{}\t0\t0\t{}", lr, concordant, failed_block);
     }
 }
