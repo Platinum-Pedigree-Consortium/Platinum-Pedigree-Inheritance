@@ -106,7 +106,6 @@ pub fn parse_inht(inht_fn: String) -> Vec<InheritanceBlock> {
             println!("Warning skipping block missing both parents {}", ihtblock);
             continue;
         }
-        println!("{}", ihtblock);
         inht_info.push(ihtblock);
     }
     return inht_info;
