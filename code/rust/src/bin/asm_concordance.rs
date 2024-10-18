@@ -235,13 +235,6 @@ fn bam_to_fasta(
         });
     }
 
-    if fasta_entries.len() > 1 {
-        return Err("Too many haplotypes".into());
-    }
-    if fasta_entries.len() < 1 {
-        return Err("Too few haplotypes".into());
-    }
-
     // Sort fasta entries by strand
     fasta_entries.sort_by(my_cmp);
 
@@ -374,12 +367,31 @@ fn fetch_haplotypes(
     region: &Region,
     flag: u16,
     flip_rc: bool,
+    problem_counts: &mut (i32, i32),
 ) -> Result<HashMap<String, (String, String)>> {
     let mut loaded_haps: HashMap<String, (String, String)> = HashMap::new();
 
     for sample in bams {
         let h1 = bam_to_fasta(&mut sample.1 .0, &region, flag, flip_rc).unwrap();
         let h2 = bam_to_fasta(&mut sample.1 .1, &region, flag, flip_rc).unwrap();
+
+        if h1.len() > 1 {
+            problem_counts.1 += 1;
+            continue;
+        }
+        if h2.len() > 1 {
+            problem_counts.1 += 1;
+            continue;
+        }
+
+        if h1.len() < 1 {
+            problem_counts.0 += 1;
+            continue;
+        }
+        if h2.len() < 1 {
+            problem_counts.0 += 1;
+            continue;
+        }
 
         let mut h1_str = "".to_string();
         if h1.len() == 1 {
@@ -424,7 +436,12 @@ fn main() {
     for region in bed_records {
         let lr: Region = region.into();
 
-        let loaded_haps = fetch_haplotypes(&mut bams, &lr, 260 as u16, false);
+        let mut problems = (0, 0);
+        let loaded_haps = fetch_haplotypes(&mut bams, &lr, 260 as u16, false, &mut problems);
+
+        if problems.0 > 0 || problems.1 > 0 {
+            println!("{}\t{}\t{}\t{}", lr, false, problems.0, problems.1);
+        }
 
         let mut block = iht::get_iht_block(
             &mut inheritance,
@@ -440,6 +457,6 @@ fn main() {
             &args.father,
         );
 
-        println!("{}\t{}", lr, concordant);
+        println!("{}\t{}\t0\t0", lr, concordant);
     }
 }
