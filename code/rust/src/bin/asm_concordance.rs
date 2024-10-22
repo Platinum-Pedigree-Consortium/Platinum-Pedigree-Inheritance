@@ -54,6 +54,20 @@ struct Assembly {
     hap2: String,
 }
 
+#[derive(Clone)]
+struct record_bucket {
+    rec: Record,
+    seq: Vec<u8>,
+}
+
+impl PartialEq for record_bucket {
+    fn eq(&self, other: &Self) -> bool {
+        self.rec == other.rec
+    }
+}
+
+impl Eq for record_bucket {}
+
 #[derive(Deserialize, Debug)]
 
 struct Region {
@@ -196,7 +210,7 @@ fn my_cmp(x: &FastaEntry, y: &FastaEntry) -> Ordering {
 
 // Function to extract sequences from BAM, trim to target region, and optionally reverse complement
 fn data_to_fasta(
-    data: &mut Lapper<usize, rust_htslib::bam::Record>,
+    data: &mut Lapper<usize, record_bucket>,
     region: &Region,
     flag: u16,
     flip_rc: bool,
@@ -204,22 +218,22 @@ fn data_to_fasta(
     let mut fasta_entries: Vec<FastaEntry> = Vec::new();
 
     for r in data.find(region.start as usize, region.end as usize) {
-        let record = &r.val;
+        let record = &r.val.rec;
 
         // Map target region to query region (read coordinates)
         let cigar = record.cigar();
         let qpos = target_to_query(&cigar, record.pos(), region.start, region.end);
 
         // Extract the subsequence within the query region
-        let seq = record.seq().as_bytes();
+
         let q_start = qpos.0 as usize;
         let q_end = qpos.1 as usize;
 
-        if q_start >= seq.len() || q_end >= seq.len() || q_start > q_end {
+        if q_start >= r.val.seq.len() || q_end >= r.val.seq.len() || q_start > q_end {
             continue;
         }
 
-        let mut dna_seq = String::from_utf8(seq[q_start..=q_end].to_vec())?;
+        let mut dna_seq = String::from_utf8(r.val.seq[q_start..=q_end].to_vec())?;
 
         // Optionally reverse complement the sequence
         if flip_rc && record.is_reverse() {
@@ -361,7 +375,7 @@ fn open_bam_files(fns: HashMap<String, Assembly>) -> Result<HashMap<String, [Ind
 }
 
 fn fetch_haplotypes(
-    data: &mut HashMap<String, [Lapper<usize, Record>; 2]>,
+    data: &mut HashMap<String, [Lapper<usize, record_bucket>; 2]>,
     region: &Region,
     flag: u16,
     flip_rc: bool,
@@ -413,11 +427,11 @@ fn fetch_haplotypes(
 fn load_chromosome(
     samples: &mut HashMap<String, [IndexedReader; 2]>,
     chr: &String,
-    data: &mut HashMap<String, [Lapper<usize, Record>; 2]>,
+    data: &mut HashMap<String, [Lapper<usize, record_bucket>; 2]>,
 ) {
     data.clear();
 
-    type Iv = Interval<usize, Record>;
+    type Iv = Interval<usize, record_bucket>;
     let mut storage: HashMap<String, [Vec<Iv>; 2]> = HashMap::new();
 
     // Initialize the storage HashMap with empty Vecs for each sample
@@ -447,11 +461,14 @@ fn load_chromosome(
             );
             // Iterate over the records in the BAM file and push them to storage
             for r in bam.records() {
-                let val = r.unwrap();
+                let rec = r.unwrap();
+                let seq = rec.seq().as_bytes();
+
+                let val = record_bucket { rec, seq };
                 let s = storage.get_mut(&sample.0.clone()).unwrap();
 
-                let start = val.reference_start() as usize;
-                let stop = val.reference_end() as usize;
+                let start = val.rec.reference_start() as usize;
+                let stop = val.rec.reference_end() as usize;
                 s[bi].push(Iv { start, stop, val });
             }
         }
@@ -498,7 +515,7 @@ fn main() {
 
     let mut last_chrom = "".to_string();
 
-    let mut read_data: HashMap<String, [Lapper<usize, Record>; 2]> = HashMap::new();
+    let mut read_data: HashMap<String, [Lapper<usize, record_bucket>; 2]> = HashMap::new();
 
     for region in bed_records {
         let lr: Region = region.into();
