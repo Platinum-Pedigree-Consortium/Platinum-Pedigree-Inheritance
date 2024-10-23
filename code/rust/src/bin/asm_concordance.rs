@@ -392,17 +392,9 @@ fn fetch_haplotypes(
         let mut h1 = data_to_fasta(sample.1.get_mut(0).unwrap(), &region, flag, flip_rc).unwrap();
         let mut h2 = data_to_fasta(sample.1.get_mut(1).unwrap(), &region, flag, flip_rc).unwrap();
 
-        debug!(
-            "before sample {} h1.len {} h2.len {}",
-            sample.0,
-            h1.len(),
-            h2.len()
-        );
-
         if sex == "male"
             && (region.seqid == "X" || region.seqid == "chrX" || region.seqid == "ChrX")
         {
-            info!("creating pseudo diploid on ChrX for sample {}", sample.0);
             if h1.len() == 0 && h2.len() == 1 {
                 h1 = h2.to_vec();
             }
@@ -410,13 +402,6 @@ fn fetch_haplotypes(
                 h2 = h1.to_vec();
             }
         }
-
-        debug!(
-            "after sample {} h1.len {} h2.len {}",
-            sample.0,
-            h1.len(),
-            h2.len()
-        );
 
         if h1.len() > 1 {
             problem_counts.1 += 1;
