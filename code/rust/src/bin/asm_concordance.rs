@@ -1,4 +1,5 @@
 use clap::Parser;
+use log::debug;
 use log::info;
 use log::warn;
 use log::LevelFilter;
@@ -52,6 +53,7 @@ struct Args {
 struct Assembly {
     hap1: String,
     hap2: String,
+    sex: String,
 }
 
 #[derive(Clone)]
@@ -195,7 +197,7 @@ fn target_to_query(cigar: &CigarStringView, t_pos: i64, t_start: i64, t_end: i64
 }
 
 // Struct for holding extracted fasta entries
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct FastaEntry {
     strand: bool,
     length: usize,
@@ -359,15 +361,15 @@ fn test_concordance(
     return false;
 }
 
-fn open_bam_files(fns: HashMap<String, Assembly>) -> Result<HashMap<String, [IndexedReader; 2]>> {
+fn open_bam_files(fns: &HashMap<String, Assembly>) -> Result<HashMap<String, [IndexedReader; 2]>> {
     let mut open_bh: HashMap<String, [IndexedReader; 2]> = HashMap::new();
 
     for s in fns {
         open_bh.insert(
-            s.0,
+            s.0.clone(),
             [
-                IndexedReader::from_path(s.1.hap1).unwrap(),
-                IndexedReader::from_path(s.1.hap2).unwrap(),
+                IndexedReader::from_path(s.1.hap1.clone()).unwrap(),
+                IndexedReader::from_path(s.1.hap2.clone()).unwrap(),
             ],
         );
     }
@@ -380,12 +382,41 @@ fn fetch_haplotypes(
     flag: u16,
     flip_rc: bool,
     problem_counts: &mut (i32, i32),
+    sample_info: &HashMap<String, Assembly>,
 ) -> Result<HashMap<String, (String, String)>> {
     let mut loaded_haps: HashMap<String, (String, String)> = HashMap::new();
 
     for sample in data {
-        let h1 = data_to_fasta(sample.1.get_mut(0).unwrap(), &region, flag, flip_rc).unwrap();
-        let h2 = data_to_fasta(sample.1.get_mut(1).unwrap(), &region, flag, flip_rc).unwrap();
+        let sex = sample_info.get(sample.0).unwrap().sex.clone();
+
+        let mut h1 = data_to_fasta(sample.1.get_mut(0).unwrap(), &region, flag, flip_rc).unwrap();
+        let mut h2 = data_to_fasta(sample.1.get_mut(1).unwrap(), &region, flag, flip_rc).unwrap();
+
+        debug!(
+            "before sample {} h1.len {} h2.len {}",
+            sample.0,
+            h1.len(),
+            h2.len()
+        );
+
+        if sex == "male"
+            && (region.seqid == "X" || region.seqid == "chrX" || region.seqid == "ChrX")
+        {
+            info!("creating pseudo diploid on ChrX for sample {}", sample.0);
+            if h1.len() == 0 && h2.len() == 1 {
+                h1 = h2.to_vec();
+            }
+            if h2.len() == 0 && h1.len() == 1 {
+                h2 = h1.to_vec();
+            }
+        }
+
+        debug!(
+            "after sample {} h1.len {} h2.len {}",
+            sample.0,
+            h1.len(),
+            h2.len()
+        );
 
         if h1.len() > 1 {
             problem_counts.1 += 1;
@@ -509,7 +540,7 @@ fn main() {
     let sample_info: HashMap<String, Assembly> = serde_json::from_str(&json_data).unwrap();
 
     // open bam files
-    let mut bams: HashMap<String, [IndexedReader; 2]> = open_bam_files(sample_info).unwrap();
+    let mut bams: HashMap<String, [IndexedReader; 2]> = open_bam_files(&sample_info).unwrap();
 
     let bed_records = concordance::bed::read_bed_file(args.region).unwrap();
 
@@ -525,7 +556,14 @@ fn main() {
         }
 
         let mut problems = (0, 0);
-        let loaded_haps = fetch_haplotypes(&mut read_data, &lr, 260 as u16, false, &mut problems);
+        let loaded_haps = fetch_haplotypes(
+            &mut read_data,
+            &lr,
+            260 as u16,
+            false,
+            &mut problems,
+            &sample_info,
+        );
 
         let mut current_block_idx: usize = 0;
         let mut block = iht::get_iht_block(
