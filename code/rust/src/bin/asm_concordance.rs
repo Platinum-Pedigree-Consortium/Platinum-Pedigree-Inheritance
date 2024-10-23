@@ -1,22 +1,15 @@
 use clap::Parser;
-use log::debug;
-use log::info;
-use log::warn;
-use log::LevelFilter;
+use log::{info, warn, LevelFilter};
 use rust_htslib::bam::ext::BamRecordExtensions;
 use rust_htslib::bam::record::{Cigar, CigarStringView};
 use rust_htslib::bam::{IndexedReader, Read, Record};
 use serde::Deserialize;
-use serde_json::Value;
 use std::cmp::Ordering;
-use std::collections::{hash_map, HashMap};
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::error;
-use std::error::Error;
-use std::fmt;
 use std::fs;
 
-use concordance::bed;
 use concordance::bed::BedRecord;
 use concordance::iht;
 use concordance::iht::InheritanceBlock;
@@ -59,6 +52,7 @@ struct Assembly {
 #[derive(Clone)]
 struct record_bucket {
     rec: Record,
+    cig: CigarStringView,
     seq: Vec<u8>,
 }
 
@@ -111,11 +105,11 @@ impl Region {
         let t_start: i64 = pos_parts[0].parse()?;
         let t_end: i64 = pos_parts[1].parse()?;
 
-        Ok((Region {
+        Ok(Region {
             seqid: chrom.to_string(),
             start: t_start,
             end: t_end,
-        }))
+        })
     }
 }
 
@@ -223,8 +217,7 @@ fn data_to_fasta(
         let record = &r.val.rec;
 
         // Map target region to query region (read coordinates)
-        let cigar = record.cigar();
-        let qpos = target_to_query(&cigar, record.pos(), region.start, region.end);
+        let qpos = target_to_query(&r.val.cig, record.pos(), region.start, region.end);
 
         // Extract the subsequence within the query region
 
@@ -479,8 +472,9 @@ fn load_chromosome(
             for r in bam.records() {
                 let rec = r.unwrap();
                 let seq = rec.seq().as_bytes();
+                let cig = rec.cigar();
 
-                let val = record_bucket { rec, seq };
+                let val = record_bucket { rec, seq, cig };
                 let s = storage.get_mut(&sample.0.clone()).unwrap();
 
                 let start = val.rec.reference_start() as usize;
@@ -500,8 +494,6 @@ fn load_chromosome(
     }
 }
 fn main() {
-    let flag = 260;
-    let flip_rc = false;
     let args = Args::parse();
 
     let filter_level: LevelFilter = match args.verbosity {
@@ -551,7 +543,7 @@ fn main() {
         );
 
         let mut current_block_idx: usize = 0;
-        let mut block = iht::get_iht_block(
+        let block = iht::get_iht_block(
             &mut inheritance,
             &lr.seqid,
             lr.start.try_into().unwrap(),
