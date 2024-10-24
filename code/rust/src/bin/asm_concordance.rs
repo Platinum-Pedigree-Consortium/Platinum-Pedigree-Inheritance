@@ -1,21 +1,22 @@
 use clap::Parser;
+use log::{info, warn, LevelFilter};
+use rust_htslib::bam::ext::BamRecordExtensions;
 use rust_htslib::bam::record::{Cigar, CigarStringView};
 use rust_htslib::bam::{IndexedReader, Read, Record};
 use serde::Deserialize;
-use serde_json::Value;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::error;
-use std::error::Error;
-use std::fmt;
 use std::fs;
 
-use concordance::bed;
 use concordance::bed::BedRecord;
 use concordance::iht;
 use concordance::iht::InheritanceBlock;
 
 type Result<T> = std::result::Result<T, Box<dyn error::Error>>;
+
+use rust_lapper::{Interval, Lapper};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -36,6 +37,8 @@ struct Args {
     /// father name (matched to json)
     #[arg(short, long)]
     father: String,
+    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count, default_value_t = 0)]
+    verbosity: u8,
 }
 
 #[derive(Deserialize, Debug)]
@@ -43,7 +46,23 @@ struct Args {
 struct Assembly {
     hap1: String,
     hap2: String,
+    sex: String,
 }
+
+#[derive(Clone)]
+struct record_bucket {
+    rec: Record,
+    cig: CigarStringView,
+    seq: Vec<u8>,
+}
+
+impl PartialEq for record_bucket {
+    fn eq(&self, other: &Self) -> bool {
+        self.rec == other.rec
+    }
+}
+
+impl Eq for record_bucket {}
 
 #[derive(Deserialize, Debug)]
 
@@ -86,11 +105,11 @@ impl Region {
         let t_start: i64 = pos_parts[0].parse()?;
         let t_end: i64 = pos_parts[1].parse()?;
 
-        Ok((Region {
+        Ok(Region {
             seqid: chrom.to_string(),
             start: t_start,
             end: t_end,
-        }))
+        })
     }
 }
 
@@ -172,7 +191,7 @@ fn target_to_query(cigar: &CigarStringView, t_pos: i64, t_start: i64, t_end: i64
 }
 
 // Struct for holding extracted fasta entries
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct FastaEntry {
     strand: bool,
     length: usize,
@@ -186,40 +205,30 @@ fn my_cmp(x: &FastaEntry, y: &FastaEntry) -> Ordering {
 }
 
 // Function to extract sequences from BAM, trim to target region, and optionally reverse complement
-fn bam_to_fasta(
-    bam: &mut IndexedReader,
+fn data_to_fasta(
+    data: &mut Lapper<usize, record_bucket>,
     region: &Region,
     flag: u16,
     flip_rc: bool,
 ) -> Result<Vec<FastaEntry>> {
-    // Get reference sequence ID for chromosome name
-    let tid = bam
-        .header()
-        .tid(region.seqid.as_bytes())
-        .ok_or_else(|| format!("Chromosome '{}' not found in BAM file", region.seqid))?;
-
-    // Fetch the reads that overlap with the region
-    bam.fetch((tid, region.start, region.end))?;
-
     let mut fasta_entries: Vec<FastaEntry> = Vec::new();
 
-    for r in bam.records() {
-        let record = r.unwrap();
+    for r in data.find(region.start as usize, region.end as usize) {
+        let record = &r.val.rec;
 
         // Map target region to query region (read coordinates)
-        let cigar = record.cigar();
-        let qpos = target_to_query(&cigar, record.pos(), region.start, region.end);
+        let qpos = target_to_query(&r.val.cig, record.pos(), region.start, region.end);
 
         // Extract the subsequence within the query region
-        let seq = record.seq().as_bytes();
+
         let q_start = qpos.0 as usize;
         let q_end = qpos.1 as usize;
 
-        if q_start >= seq.len() || q_end >= seq.len() || q_start > q_end {
+        if q_start >= r.val.seq.len() || q_end >= r.val.seq.len() || q_start > q_end {
             continue;
         }
 
-        let mut dna_seq = String::from_utf8(seq[q_start..=q_end].to_vec())?;
+        let mut dna_seq = String::from_utf8(r.val.seq[q_start..=q_end].to_vec())?;
 
         // Optionally reverse complement the sequence
         if flip_rc && record.is_reverse() {
@@ -345,35 +354,47 @@ fn test_concordance(
     return false;
 }
 
-fn open_bam_files(
-    fns: HashMap<String, Assembly>,
-) -> Result<HashMap<String, (IndexedReader, IndexedReader)>> {
-    let mut open_bh: HashMap<String, (IndexedReader, IndexedReader)> = HashMap::new();
+fn open_bam_files(fns: &HashMap<String, Assembly>) -> Result<HashMap<String, [IndexedReader; 2]>> {
+    let mut open_bh: HashMap<String, [IndexedReader; 2]> = HashMap::new();
 
     for s in fns {
         open_bh.insert(
-            s.0,
-            (
-                IndexedReader::from_path(s.1.hap1).unwrap(),
-                IndexedReader::from_path(s.1.hap2).unwrap(),
-            ),
+            s.0.clone(),
+            [
+                IndexedReader::from_path(s.1.hap1.clone()).unwrap(),
+                IndexedReader::from_path(s.1.hap2.clone()).unwrap(),
+            ],
         );
     }
     return Ok(open_bh);
 }
 
 fn fetch_haplotypes(
-    bams: &mut HashMap<String, (IndexedReader, IndexedReader)>,
+    data: &mut HashMap<String, [Lapper<usize, record_bucket>; 2]>,
     region: &Region,
     flag: u16,
     flip_rc: bool,
     problem_counts: &mut (i32, i32),
+    sample_info: &HashMap<String, Assembly>,
 ) -> Result<HashMap<String, (String, String)>> {
     let mut loaded_haps: HashMap<String, (String, String)> = HashMap::new();
 
-    for sample in bams {
-        let h1 = bam_to_fasta(&mut sample.1 .0, &region, flag, flip_rc).unwrap();
-        let h2 = bam_to_fasta(&mut sample.1 .1, &region, flag, flip_rc).unwrap();
+    for sample in data {
+        let sex = sample_info.get(sample.0).unwrap().sex.clone();
+
+        let mut h1 = data_to_fasta(sample.1.get_mut(0).unwrap(), &region, flag, flip_rc).unwrap();
+        let mut h2 = data_to_fasta(sample.1.get_mut(1).unwrap(), &region, flag, flip_rc).unwrap();
+
+        if sex == "male"
+            && (region.seqid == "X" || region.seqid == "chrX" || region.seqid == "ChrX")
+        {
+            if h1.len() == 0 && h2.len() == 1 {
+                h1 = h2.to_vec();
+            }
+            if h2.len() == 0 && h1.len() == 1 {
+                h2 = h1.to_vec();
+            }
+        }
 
         if h1.len() > 1 {
             problem_counts.1 += 1;
@@ -412,10 +433,79 @@ fn fetch_haplotypes(
     Ok(loaded_haps)
 }
 
+fn load_chromosome(
+    samples: &mut HashMap<String, [IndexedReader; 2]>,
+    chr: &String,
+    data: &mut HashMap<String, [Lapper<usize, record_bucket>; 2]>,
+) {
+    data.clear();
+
+    type Iv = Interval<usize, record_bucket>;
+    let mut storage: HashMap<String, [Vec<Iv>; 2]> = HashMap::new();
+
+    // Initialize the storage HashMap with empty Vecs for each sample
+    for sample in samples.iter() {
+        storage.insert(sample.0.clone(), [Vec::new(), Vec::new()]);
+    }
+
+    // Iterate over the samples and fetch records for the given chromosome
+    for sample in samples.iter_mut() {
+        for bi in 0..2 {
+            // Get a mutable reference to the BAM reader using `get_mut`
+            let bam: &mut IndexedReader = sample.1.get_mut(bi).unwrap();
+
+            // Find the target ID (tid) for the chromosome in the BAM header
+            let tid = bam
+                .header()
+                .tid(chr.as_bytes())
+                .ok_or_else(|| format!("Chromosome '{}' not found in BAM file", chr))
+                .unwrap();
+
+            // Fetch the reads for the specific chromosome
+            bam.fetch(tid).unwrap();
+
+            info!(
+                "loading mapped contigs for sample: {} haplotype: {} chromosome: {}",
+                sample.0, bi, chr
+            );
+            // Iterate over the records in the BAM file and push them to storage
+            for r in bam.records() {
+                let rec = r.unwrap();
+                let seq = rec.seq().as_bytes();
+                let cig = rec.cigar();
+
+                let val = record_bucket { rec, seq, cig };
+                let s = storage.get_mut(&sample.0.clone()).unwrap();
+
+                let start = val.rec.reference_start() as usize;
+                let stop = val.rec.reference_end() as usize;
+                s[bi].push(Iv { start, stop, val });
+            }
+        }
+    }
+    for sample in storage {
+        data.insert(
+            sample.0,
+            [
+                Lapper::new((*sample.1.get(0).unwrap().clone()).to_vec()),
+                Lapper::new((*sample.1.get(1).unwrap().clone()).to_vec()),
+            ],
+        );
+    }
+}
 fn main() {
-    let flag = 260;
-    let flip_rc = false;
     let args = Args::parse();
+
+    let filter_level: LevelFilter = match args.verbosity {
+        0 => LevelFilter::Info,
+        1 => LevelFilter::Debug,
+        _ => LevelFilter::Trace,
+    };
+
+    env_logger::builder()
+        .format_timestamp_millis()
+        .filter_level(filter_level)
+        .init();
 
     // Load up the inheritance vectors
     let mut inheritance = iht::parse_inht(args.inheritance);
@@ -427,19 +517,33 @@ fn main() {
     let sample_info: HashMap<String, Assembly> = serde_json::from_str(&json_data).unwrap();
 
     // open bam files
-    let mut bams: HashMap<String, (IndexedReader, IndexedReader)> =
-        open_bam_files(sample_info).unwrap();
+    let mut bams: HashMap<String, [IndexedReader; 2]> = open_bam_files(&sample_info).unwrap();
 
     let bed_records = concordance::bed::read_bed_file(args.region).unwrap();
 
+    let mut last_chrom = "".to_string();
+
+    let mut read_data: HashMap<String, [Lapper<usize, record_bucket>; 2]> = HashMap::new();
+
     for region in bed_records {
         let lr: Region = region.into();
+        if last_chrom != lr.seqid {
+            last_chrom = lr.seqid.clone();
+            load_chromosome(&mut bams, &last_chrom, &mut read_data);
+        }
 
         let mut problems = (0, 0);
-        let loaded_haps = fetch_haplotypes(&mut bams, &lr, 260 as u16, false, &mut problems);
+        let loaded_haps = fetch_haplotypes(
+            &mut read_data,
+            &lr,
+            260 as u16,
+            false,
+            &mut problems,
+            &sample_info,
+        );
 
         let mut current_block_idx: usize = 0;
-        let mut block = iht::get_iht_block(
+        let block = iht::get_iht_block(
             &mut inheritance,
             &lr.seqid,
             lr.start.try_into().unwrap(),
@@ -449,7 +553,7 @@ fn main() {
         let mut failed_block = false;
         match block {
             None => {
-                println!(
+                warn!(
                     "Warning: skipping variant as it is not in a block {} {}",
                     lr.seqid, lr.start
                 );
