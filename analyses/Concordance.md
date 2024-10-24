@@ -15,9 +15,9 @@ usage:
 concordance \
 --father NA12877 \
 --mother NA12878 \
---vcf {}.vcf.gz \
---inheritance data/ceph.GRCh38.viterbi.csv.gz \
---prefix {} > std.out
+--vcf data/ceph_oa_test.vcf.gz \
+--inheritance ceph.GRCh38.viterbi.oa.csv.gz \
+--prefix test > std.out
 ```
 
 The input inheritance vectors are distributed with this repo and can be found in "data/ceph.GRCh38.viterbi.csv.gz".
