@@ -20,4 +20,13 @@ concordance \
 --prefix test > std.out
 ```
 
-The input inheritance vectors are distributed with this repo and can be found in "data/ceph.GRCh38.viterbi.csv.gz".
+runtime for test data:
+```
+real    0m0.103s
+user    0m0.073s
+sys     0m0.012s
+```
+
+
+The open access inheritance vectors are distributed with this repo.
+
