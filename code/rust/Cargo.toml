@@ -5,6 +5,9 @@ authors = [ "Zev Kronenberg <zkronenberg@pacificbiosciences.com>"]
 description = "Filter and report variant counts"
 edition = "2021"
 
+[profile.release]
+debug = 1
+
 [[bin]]
 name = "concordance"
 path = "src/bin/concordance.rs"
@@ -52,3 +55,4 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 log = "0.4.20"
 env_logger = "0.10.1"
+rust-lapper = { version = "*", features = ["with_serde"] }
