@@ -278,7 +278,6 @@ fn main() {
         if alt_count == 0 && no_missing {
             all_ref += 1;
             failed_site = true;
-            println!("gv: {:?}", genovec);
         }
 
         if failed_site {
