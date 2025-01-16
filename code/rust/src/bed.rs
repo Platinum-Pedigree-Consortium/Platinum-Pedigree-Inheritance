@@ -3,11 +3,11 @@ use std::io::{self, BufRead};
 use std::path::Path;
 
 // Define a structure to represent a BED record
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BedRecord {
     pub chrom: String,
-    pub start: u64,
-    pub end: u64,
+    pub start: i64,
+    pub end: i64,
 }
 
 impl BedRecord {
@@ -20,10 +20,10 @@ impl BedRecord {
 
         let chrom = fields[0].to_string();
         let start = fields[1]
-            .parse::<u64>()
+            .parse::<i64>()
             .map_err(|_| "Invalid start position")?;
         let end = fields[2]
-            .parse::<u64>()
+            .parse::<i64>()
             .map_err(|_| "Invalid end position")?;
 
         Ok(BedRecord { chrom, start, end })
