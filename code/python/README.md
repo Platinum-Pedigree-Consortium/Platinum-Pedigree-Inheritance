@@ -30,3 +30,12 @@ The below command (assuming each SV VCF file is present), first merge pbsv into 
 ```
 python interval_tree_merge.py --vcf_files ../sv_vcfs/out/sawfish.vcf ../sv_vcfs/out/pbsv.vcf ../sv_vcfs/out/sniffles.vcf ../sv_vcfs/out/pav.vcf -o merged.vcf 
 ```
+
+## VCF intersection (Ebert)
+
+To identify the intersection and mutually exclusive SVs between our merged call set and the Ebert call set, the `sv_intersect_ebert.py` script can be used. The script has two main inputs: `--base-vcf`, which specifies our base call set, and `--query-vcf`, which specifies the Ebert call set. Optional CLI options: `--flank_len` (default = 200), allows for setting the size of flanks when building intervals, `--sizesim-threshold` (default = 0.7), specifies the relative size difference allowed before two SVs are no longer considered equivalent.
+
+Example usage:
+```
+python sv_intersect_ebert.py --base-vcf NA12878.merged_hg38.svs.sort.vcf.gz --query-vcf NA12878.freeze4.sv.alt.vcf.gz --sizesim-threshold 0.7 --flank-len 200
+```
