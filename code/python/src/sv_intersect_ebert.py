@@ -203,11 +203,18 @@ if __name__ == "__main__":
         default=0.7,
         help="Size similarity threshold (default: 0.7)",
     )
+    parser.add_argument(
+        "--valid-svtypes",
+        nargs="+",
+        choices=["INS", "DEL"],
+        default=["INS", "DEL"],
+        help="Valid SV types to consider (default: INS DEL)",
+    )
 
     args = parser.parse_args()
 
     variant_map = {}
-    valid_svtypes = set(["INS", "DEL"])
+    valid_svtypes = set(args.valid_svtypes)
     variant_map["base"] = load_all_variants(args.base_vcf, valid_svtypes)
     variant_map["query"] = load_all_variants(args.query_vcf, valid_svtypes)
 
