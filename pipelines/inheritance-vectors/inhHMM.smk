@@ -7,6 +7,8 @@ parents=[config["dad"], config["mom"]]
 children=config["children"].split(",")
 male_children=config["male_children"].split(",")
 
+# Dict to split chromosomes roughly evenly, works for GRCh38
+
 split_dict={
     "chr1": [*range(1, 9)],
     "chr2": [*range(1, 9)],
@@ -43,7 +45,8 @@ def chromosome_split_list(chromosomes, split_dict):
     return outlist
 
 
-
+# If chromosome param has been passed to the work flow
+# then set the chromosomes to specified subset
 try:
     config["chromosomes"]
     chromosomes = [config["chromosomes"]]
