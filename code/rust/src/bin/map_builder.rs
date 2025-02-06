@@ -28,7 +28,11 @@ use rust_htslib::bcf::{Format, Header, IndexedReader, Read, Writer};
 use concordance::ped::{Family, Individual};
 /// Build a pedigree haplotype map (inheritance vectors).
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(
+    author,
+    version,
+    about = " A tool to map haplotypes through generations"
+)]
 struct Args {
     /// A PED file documenting familial relationships
     #[arg(short, long)]
@@ -997,7 +1001,7 @@ fn main() {
         .unwrap();
 
     marker_file
-        .write(format!("#chom pos founder allele matches\n").as_bytes())
+        .write(format!("#chom pos founder allele matches {}\n", iht_info.legend()).as_bytes())
         .unwrap();
 
     let mut reader: IndexedReader =
@@ -1042,10 +1046,11 @@ fn main() {
             marker_file
                 .write(
                     format!(
-                        "{} {} {}\n",
+                        "{} {} {} {}\n",
                         gs.0.chrom,
                         gs.0.start,
                         marker_to_string(&markers.1),
+                        local_iht.collapse_to_string()
                     )
                     .as_bytes(),
                 )
