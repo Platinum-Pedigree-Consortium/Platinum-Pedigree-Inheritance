@@ -102,13 +102,17 @@ impl fmt::Display for Iht {
 }
 
 impl Iht {
-    fn new(founders: Vec<&Individual>, children: Vec<&Individual>) -> Self {
+    fn new(founders: Vec<&Individual>, children: Vec<&Individual>, hemizgyous: bool) -> Self {
         let mut founder_defaults = ('A'..='Z').step_by(2).zip(('B'..='Z').step_by(2));
 
         let founders_map: HashMap<String, (char, char)> = founders
             .iter()
             .map(|id| {
-                let hap_pair = founder_defaults.next().unwrap_or(('?', '?'));
+                let mut hap_pair = founder_defaults.next().unwrap_or(('?', '?'));
+                if hemizgyous && id.get_sex().unwrap() == 1 {
+                    hap_pair = (hap_pair.0, hap_pair.0);
+                }
+
                 (id.id(), hap_pair)
             })
             .collect();
@@ -994,14 +998,20 @@ fn main() {
         .unwrap();
 
     let family = Family::parse_ped_file(&args.ped).unwrap();
-    let mut iht_info = Iht::new(family.founders(), family.offspring());
+    let mut master_iht = Iht::new(family.founders(), family.offspring(), false);
 
     iht_file
-        .write(format!("#chrom start end {} marker_count len\n", iht_info.legend()).as_bytes())
+        .write(
+            format!(
+                "#chrom start end {} marker_count len\n",
+                master_iht.legend()
+            )
+            .as_bytes(),
+        )
         .unwrap();
 
     marker_file
-        .write(format!("#chom pos founder allele matches {}\n", iht_info.legend()).as_bytes())
+        .write(format!("#chom pos founder allele matches {}\n", master_iht.legend()).as_bytes())
         .unwrap();
 
     let mut reader: IndexedReader =
@@ -1010,6 +1020,10 @@ fn main() {
     let chromosomes = extract_chromosome_names(&args.vcf).unwrap();
 
     for c in chromosomes {
+        let mut hemizygous = false;
+
+        let mut iht_info = Iht::new(family.founders(), family.offspring(), hemizygous);
+
         let mut genotype_data = parse_vcf(&mut reader, c.1, &c.0, args.qual).unwrap();
 
         if genotype_data.len() == 0 {
@@ -1039,7 +1053,7 @@ fn main() {
                 continue;
             }
 
-            let mut local_iht = Iht::new(family.founders(), family.offspring());
+            let mut local_iht = Iht::new(family.founders(), family.offspring(), hemizygous);
 
             load_up(&family, &mut local_iht, &markers.1);
 
