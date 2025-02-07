@@ -13,6 +13,10 @@ name = "concordance"
 path = "src/bin/concordance.rs"
 
 [[bin]]
+name = "gtg-ped-map"
+path = "src/bin/map_builder.rs"
+
+[[bin]]
 name = "mash2vcf"
 path = "src/bin/mash2vcf.rs"
 
@@ -56,3 +60,4 @@ serde_json = "1.0"
 log = "0.4.20"
 env_logger = "0.10.1"
 rust-lapper = { version = "*", features = ["with_serde"] }
+itertools = "0.14.0"
