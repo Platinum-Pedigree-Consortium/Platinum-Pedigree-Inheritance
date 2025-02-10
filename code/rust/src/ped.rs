@@ -98,10 +98,16 @@ impl Family {
     }
 
     pub fn founders(&self) -> Vec<&Individual> {
-        self.individuals
+        let mut founders: Vec<&Individual> = self
+            .individuals
             .values()
             .filter(|ind| ind.no_parents() && ind.has_children())
-            .collect()
+            .collect();
+
+        // Sort by ID (assuming Individual has a method `id()` that returns &str)
+        founders.sort_by_key(|ind| ind.id());
+
+        founders
     }
 
     /// Returns a list of offspring (individuals with parents) sorted by increasing depth.
