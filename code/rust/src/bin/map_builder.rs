@@ -1,29 +1,25 @@
 use clap::Parser;
 use concordance::bed::BedRecord;
-use concordance::iht;
-use itertools::iproduct;
+
 use itertools::Itertools;
 use log::{debug, error, info, warn, LevelFilter};
-use rust_htslib::htslib::fai_format_options_FAI_FASTA;
-use rust_htslib::htslib::hts_name2id_f;
-use std::collections::VecDeque;
+
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::fs::File;
+
 use std::fs::OpenOptions;
 use std::io;
-use std::io::BufRead;
+
 use std::io::Read as IoRead;
 use std::io::Write;
-use std::mem::swap;
+
 use std::path::Path;
 use std::process;
 use std::str;
 
-use rust_htslib::bcf::header::HeaderView;
-use rust_htslib::bcf::record::{Genotype, GenotypeAllele};
+use rust_htslib::bcf::record::GenotypeAllele;
 use rust_htslib::bcf::Record;
-use rust_htslib::bcf::{Format, Header, IndexedReader, Read, Writer};
+use rust_htslib::bcf::{IndexedReader, Read};
 
 use concordance::ped::{Family, Individual};
 /// Build a pedigree haplotype map (inheritance vectors).
@@ -62,6 +58,14 @@ struct Args {
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count, default_value_t = 0)]
     verbosity: u8,
 }
+#[derive(PartialEq)]
+enum ChromType {
+    ChrX,
+    ChrY,
+    ChrM,
+    Autosome,
+}
+
 #[derive(Clone, Debug)]
 struct Iht {
     /// sample ID, (hapA, hapB)
@@ -102,15 +106,19 @@ impl fmt::Display for Iht {
 }
 
 impl Iht {
-    fn new(founders: Vec<&Individual>, children: Vec<&Individual>, hemizgyous: bool) -> Self {
+    fn new(founders: Vec<&Individual>, children: Vec<&Individual>, hemi: &ChromType) -> Self {
         let mut founder_defaults = ('A'..='Z').step_by(2).zip(('B'..='Z').step_by(2));
 
         let founders_map: HashMap<String, (char, char)> = founders
             .iter()
             .map(|id| {
+                // mitochondria and Y are always hemi
                 let mut hap_pair = founder_defaults.next().unwrap_or(('?', '?'));
-                if hemizgyous && id.get_sex().unwrap() == 1 {
-                    hap_pair = (hap_pair.0, hap_pair.0);
+                if *hemi == ChromType::ChrY || *hemi == ChromType::ChrM {
+                    hap_pair = (hap_pair.0, '.');
+                    // male chr X
+                } else if *hemi == ChromType::ChrX && id.get_sex().unwrap() == 1 {
+                    hap_pair = ('.', hap_pair.0);
                 }
 
                 (id.id(), hap_pair)
@@ -279,21 +287,33 @@ impl Iht {
     /// The resulting string concatenates the two characters for each individual,
     /// sorted by sample ID (founders first, then children).
     fn collapse_to_string(&self) -> String {
-        // Sort and add founders to the string
+        // Helper function that chooses the separator:
+        // if either allele is '.', use "|" regardless of the provided default separator.
+        fn format_alleles(hap_a: &char, hap_b: &char, default_sep: &str) -> String {
+            // Compare the alleles directly as chars.
+            let sep = if *hap_a == '.' || *hap_b == '.' {
+                "|"
+            } else {
+                default_sep
+            };
+            format!("{}{}{} ", hap_a, sep, hap_b)
+        }
+
+        // Sort and add founders to the string.
         let mut sorted_founders: Vec<_> = self.founders.iter().collect();
         sorted_founders.sort_by_key(|(id, _)| *id);
         let founders_str: String = sorted_founders
             .iter()
-            .map(|(_, (hap_a, hap_b))| format!("{}/{} ", hap_a, hap_b))
+            .map(|(_, (hap_a, hap_b))| format_alleles(hap_a, hap_b, "/"))
             .collect::<Vec<_>>()
             .join(" ");
 
-        // Sort and add children to the string
+        // Sort and add children to the string.
         let mut sorted_children: Vec<_> = self.children.iter().collect();
         sorted_children.sort_by_key(|(id, _)| *id);
         let children_str: String = sorted_children
             .iter()
-            .map(|(_, (hap_a, hap_b))| format!("{}|{} ", hap_a, hap_b))
+            .map(|(_, (hap_a, hap_b))| format_alleles(hap_a, hap_b, "|"))
             .collect::<Vec<_>>()
             .join(" ");
 
@@ -408,7 +428,7 @@ fn extract_chromosome_names(
 }
 
 fn get_samples(vcf_path: &str) -> io::Result<Vec<String>> {
-    let mut bcf = IndexedReader::from_path(vcf_path).expect("Error opening vcf file.");
+    let bcf = IndexedReader::from_path(vcf_path).expect("Error opening vcf file.");
     let header = bcf.header();
 
     let samples: Vec<String> = header
@@ -440,7 +460,7 @@ fn parse_vcf(
     }
 
     // Extract sample names from the VCF header
-    let mut header = reader.header();
+    let header = reader.header();
     let samples: Vec<String> = header
         .samples()
         .iter()
@@ -610,29 +630,49 @@ fn load_up(
     fam: &Family,
     iht: &mut Iht,
     markers: &HashMap<String, (HashSet<GenotypeAllele>, Vec<String>)>,
+    zygosity: &ChromType,
 ) {
     for f in markers {
         let founder_alleles = iht.get_alleles(f.0).unwrap();
         let founder_info = fam.get_individual(f.0).unwrap();
+
+        // By default, use the first allele; if on ChrX and the founder is male, flip to the second allele.
+        let mut founder_allele = founder_alleles.0;
+        if *zygosity == ChromType::ChrX && founder_info.get_sex().unwrap() == 1 {
+            founder_allele = founder_alleles.1;
+        }
+
         for o in &f.1 .1 {
             let child_alleles = iht.children.get(o).unwrap();
-            // paternal goes left
 
-            // this bit of logic deals with fact that founders alleles are passed across generations and we need to flip past G2, based on the parent.
-            let child = fam.get_individual(&o).unwrap();
+            // This logic deals with allele inheritance across generations.
+            let child = fam.get_individual(o).unwrap();
             let father = fam.get_individual(&child.get_father_id().unwrap()).unwrap();
 
             if f.1 .1.contains(&father.id()) || *f.0 == father.id() {
+                // paternal allele goes to the left
                 iht.children
-                    .insert((*o).clone(), (founder_alleles.0, child_alleles.1));
+                    .insert((*o).clone(), (founder_allele, child_alleles.1));
             } else {
-                // maternal goes right
+                // maternal allele goes to the right
                 iht.children
-                    .insert((*o).clone(), (child_alleles.1, founder_alleles.0));
+                    .insert((*o).clone(), (child_alleles.1, founder_allele));
+            }
+        }
+    }
+
+    // After processing markers, update children genotypes for ChrX:
+    // If the ChromType is ChrX and the child is male, set the first genotype entry to "."
+    if *zygosity == ChromType::ChrX {
+        for (child_id, genotype) in iht.children.iter_mut() {
+            let child = fam.get_individual(child_id).unwrap();
+            if child.get_sex().unwrap() == 1 {
+                genotype.0 = '.';
             }
         }
     }
 }
+
 /// Applies the threshold filtering over a mutable vector of IhtVecs.
 fn apply_threshold_to_vec(iht_vecs: &mut Vec<IhtVec>, threshold: usize) {
     let mut prev: Option<&IhtVec> = None;
@@ -697,8 +737,8 @@ fn collapse_identical_iht(data: Vec<IhtVec>) -> Vec<IhtVec> {
     let mut collapsed = Vec::new();
     let mut iter = data.into_iter().peekable();
 
-    while let Some(mut current) = iter.next() {
-        let mut start = current.bed.start;
+    while let Some(current) = iter.next() {
+        let start = current.bed.start;
         let mut end = current.bed.end;
         let mut count = current.count;
         let mut merged_founders = current.iht.founders.clone();
@@ -939,6 +979,37 @@ fn fill_missing_values(iht_vecs: &mut Vec<IhtVec>) {
     }
 }
 
+/// Analyzes a reference to `Vec<IhtVec>` and detects children whose characters change between consecutive segments.
+/// Outputs a vector of space-separated strings in the format:
+/// `last_end next_start child_id old_char new_char`
+fn summarize_child_changes(iht_vecs: &Vec<IhtVec>) -> Vec<String> {
+    let mut summaries = Vec::new();
+
+    for window in iht_vecs.windows(2) {
+        let previous = &window[0];
+        let next = &window[1];
+
+        for (child, &(prev_a, prev_b)) in &previous.iht.children {
+            if let Some(&(next_a, next_b)) = next.iht.children.get(child) {
+                // Check if either haplotype changes
+                if prev_a != next_a {
+                    summaries.push(format!(
+                        "{} {} {} {} {}",
+                        previous.bed.end, next.bed.start, child, prev_a, next_a
+                    ));
+                }
+                if prev_b != next_b {
+                    summaries.push(format!(
+                        "{} {} {} {} {}",
+                        previous.bed.end, next.bed.start, child, prev_b, next_b
+                    ));
+                }
+            }
+        }
+    }
+
+    summaries
+}
 fn main() {
     let args = Args::parse();
 
@@ -954,15 +1025,19 @@ fn main() {
         .init();
 
     let mut iht_vec_output_fn = args.prefix.clone();
-    iht_vec_output_fn += ".iht";
+    iht_vec_output_fn += ".iht.txt";
 
     let mut marker_output_fn = args.prefix.clone();
-    marker_output_fn += ".markers";
+    marker_output_fn += ".markers.txt";
+
+    let mut recomb_output_fn = args.prefix.clone();
+    recomb_output_fn += ".recombinants.txt";
 
     let iht_path = Path::new(&iht_vec_output_fn);
     let marker_path = Path::new(&marker_output_fn);
+    let recomb_path = Path::new(&recomb_output_fn);
 
-    if iht_path.exists() || marker_path.exists() {
+    if iht_path.exists() || marker_path.exists() || recomb_path.exists() {
         error!("output already exists for prefix: \" {} \" ", args.prefix);
         process::exit(1); // Exit with a non-zero status code
     }
@@ -997,8 +1072,15 @@ fn main() {
         .open(marker_output_fn)
         .unwrap();
 
+    // Open the file with write and create options
+    let mut recomb_file = OpenOptions::new()
+        .write(true) // Open for writing
+        .create(true) // Create if it doesn't exist
+        .open(recomb_output_fn)
+        .unwrap();
+
     let family = Family::parse_ped_file(&args.ped).unwrap();
-    let mut master_iht = Iht::new(family.founders(), family.offspring(), false);
+    let master_iht = Iht::new(family.founders(), family.offspring(), &ChromType::Autosome);
 
     iht_file
         .write(
@@ -1014,27 +1096,31 @@ fn main() {
         .write(format!("#chom pos founder allele matches {}\n", master_iht.legend()).as_bytes())
         .unwrap();
 
+    recomb_file
+        .write(format!("#chrom start end sample hap1 hap2\n").as_bytes())
+        .unwrap();
+
     let mut reader: IndexedReader =
         IndexedReader::from_path(&args.vcf).expect("Failure to read VCF file.");
 
     let chromosomes = extract_chromosome_names(&args.vcf).unwrap();
 
     for c in chromosomes {
-        let mut hemizygous = false;
+        let mut zygosity = ChromType::Autosome;
 
-        let mut iht_info = Iht::new(family.founders(), family.offspring(), hemizygous);
+        if c.0.contains("chrX") || c.0.contains("ChrX") {
+            zygosity = ChromType::ChrX;
+        }
 
-        let mut genotype_data = parse_vcf(&mut reader, c.1, &c.0, args.qual).unwrap();
+        let mut iht_info = Iht::new(family.founders(), family.offspring(), &zygosity);
+
+        let genotype_data = parse_vcf(&mut reader, c.1, &c.0, args.qual).unwrap();
 
         if genotype_data.len() == 0 {
             continue;
         }
 
-        info!(
-            "{} has {} variant records (sites)",
-            c.0,
-            genotype_data.len()
-        );
+        info!("{} has {} variant records.", c.0, genotype_data.len());
 
         let mut pre_vector: Vec<IhtVec> = Vec::new();
 
@@ -1053,9 +1139,9 @@ fn main() {
                 continue;
             }
 
-            let mut local_iht = Iht::new(family.founders(), family.offspring(), hemizygous);
+            let mut local_iht = Iht::new(family.founders(), family.offspring(), &zygosity);
 
-            load_up(&family, &mut local_iht, &markers.1);
+            load_up(&family, &mut local_iht, &markers.1, &zygosity);
 
             marker_file
                 .write(
@@ -1079,7 +1165,7 @@ fn main() {
                 non_missing_counts: count_non_missing(&local_iht.founders, &local_iht.children),
             });
         }
-        info!("There are {} haplotype marker (sites).", pre_vector.len());
+        info!("{} has {} haplotype marker sites.", c.0, pre_vector.len());
 
         let mut iht_vecs = collapse_identical_iht(pre_vector);
 
@@ -1088,7 +1174,7 @@ fn main() {
         let mut filtered_iht_vec = collapse_identical_iht(iht_vecs);
         fill_missing_values(&mut filtered_iht_vec);
 
-        for i in filtered_iht_vec {
+        for i in &filtered_iht_vec {
             iht_file
                 .write(
                     format!(
@@ -1102,6 +1188,11 @@ fn main() {
                     )
                     .as_bytes(),
                 )
+                .unwrap();
+        }
+        for recomb in summarize_child_changes(&filtered_iht_vec) {
+            recomb_file
+                .write(format!("{} {}\n", c.0, recomb).as_bytes())
                 .unwrap();
         }
     }
