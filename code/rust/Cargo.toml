@@ -17,6 +17,10 @@ name = "gtg-ped-map"
 path = "src/bin/map_builder.rs"
 
 [[bin]]
+name = "gtg-concordance"
+path = "src/bin/gtg_concordance.rs"
+
+[[bin]]
 name = "mash2vcf"
 path = "src/bin/mash2vcf.rs"
 
