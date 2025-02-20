@@ -384,10 +384,11 @@ fn check_individuals_in_vcf(ped_path: &str, vcf_path: &str) -> io::Result<()> {
 
     for id in family.get_individuals_ids() {
         if !vcf_samples.contains(&id) {
-            warn!(
+            error!(
                 "Individual ID {} from PED file is not found in the VCF header.",
                 id
             );
+            process::exit(1);
         }
     }
     debug!("Cross-validated vcf and ped files");
@@ -1010,6 +1011,212 @@ fn summarize_child_changes(iht_vecs: &Vec<IhtVec>) -> Vec<String> {
 
     summaries
 }
+
+fn optimize_and_merge_ihtvecs(
+    iht_vecs: &Vec<IhtVec>,
+    founders: Vec<&Individual>,
+    family: &Family,
+) -> Vec<IhtVec> {
+    let mut optimized_vecs: Vec<IhtVec> = Vec::new();
+
+    for mut current in iht_vecs.iter().cloned() {
+        if let Some(previous) = optimized_vecs.last_mut() {
+            let original_mismatches = count_mismatches(&previous.iht, &current.iht);
+            let mut swapped_iht = current.iht.clone();
+
+            for founder in &founders {
+                let founder_id = founder.id();
+
+                // Get the founder's alleles
+                if let Some((founder_allele_a, founder_allele_b)) =
+                    swapped_iht.founders.get(&founder_id)
+                {
+                    // Clone before modifying to avoid borrowing conflicts
+                    let mut temp_iht = swapped_iht.clone();
+
+                    // Swap the founder alleles across all children
+                    for (child_id, (hap_a, hap_b)) in temp_iht.children.iter_mut() {
+                        if *hap_a == *founder_allele_a {
+                            *hap_a = *founder_allele_b;
+                        } else if *hap_a == *founder_allele_b {
+                            *hap_a = *founder_allele_a;
+                        }
+
+                        if *hap_b == *founder_allele_a {
+                            *hap_b = *founder_allele_b;
+                        } else if *hap_b == *founder_allele_b {
+                            *hap_b = *founder_allele_a;
+                        }
+                    }
+
+                    let swapped_mismatches = count_mismatches(&previous.iht, &temp_iht);
+
+                    // Apply swap across children only if it reduces mismatches
+                    if swapped_mismatches < original_mismatches {
+                        /*
+                        println!(
+                            "{} {} {}/{} c:{} o:{}\no:{}\nm:{}",
+                            current.bed.start,
+                            founder_id,
+                            founder_allele_a,
+                            founder_allele_b,
+                            swapped_mismatches,
+                            original_mismatches,
+                            current.iht.collapse_to_string(),
+                            temp_iht.collapse_to_string()
+                        );
+                        */
+                        swapped_iht = temp_iht;
+                    }
+                }
+            }
+
+            // Otherwise, update `current.iht`
+            current.iht = swapped_iht;
+        }
+
+        optimized_vecs.push(current);
+    }
+
+    optimized_vecs
+}
+
+/// Counts the number of mismatches between two Iht structures
+fn count_mismatches(iht1: &Iht, iht2: &Iht) -> usize {
+    iht1.children
+        .iter()
+        .filter(|(child_id, (a1, b1))| {
+            if let Some((a2, b2)) = iht2.children.get(*child_id) {
+                (*a1 != *a2) as usize + (*b1 != *b2) as usize > 0
+            } else {
+                true // Mismatch if child is absent in one of the Ihts
+            }
+        })
+        .count()
+}
+
+fn backfill_sibs(fam: &Family, iht: &Iht) -> Iht {
+    let mut updated_iht = iht.clone(); // Create a mutable clone
+
+    for (founder_id, (founder_hap_a, founder_hap_b)) in &iht.founders {
+        // Get all children of this founder
+        let children = fam.get_children(founder_id);
+
+        // Process only if the founder has multiple children
+        if children.len() > 1 {
+            let mut identified_allele: Option<(char, usize)> = None;
+
+            // Step 1: Identify which founder allele is present in at least one child
+            for child_id in &children {
+                if let Some(&(hap_a, hap_b)) = updated_iht.children.get(*child_id) {
+                    if hap_a == *founder_hap_a || hap_a == *founder_hap_b {
+                        identified_allele = Some((hap_a, 0));
+                    } else if hap_b == *founder_hap_a || hap_b == *founder_hap_b {
+                        identified_allele = Some((hap_b, 1));
+                    }
+                }
+            }
+
+            // Step 2: If no child has a founder allele, skip backfilling
+            if identified_allele.is_none() {
+                continue;
+            }
+
+            let (mut inherited_allele, allele_index) = identified_allele.unwrap();
+            let mut non_inherited_allele = if inherited_allele == *founder_hap_a {
+                *founder_hap_b
+            } else {
+                *founder_hap_a
+            };
+
+            // Step 3: Assign the other founder allele to children who do not have the inherited allele
+            for child_id in &children {
+                if let Some(child_hap) = updated_iht.children.get_mut(child_id.clone()) {
+                    let (child_hap_a, child_hap_b) = child_hap;
+
+                    // Check if the child already has the inherited allele
+                    if *child_hap_a == inherited_allele || *child_hap_b == inherited_allele {
+                        continue;
+                    }
+
+                    // Assign the missing founder allele to the correct index
+                    if allele_index == 0 {
+                        *child_hap_a = non_inherited_allele;
+                    } else {
+                        *child_hap_b = non_inherited_allele;
+                    }
+                }
+            }
+
+            // Step 4: Count allele frequencies AFTER backfilling
+            let mut allele_counts = std::collections::HashMap::new();
+            for child_id in &children {
+                if let Some(&(hap_a, hap_b)) = updated_iht.children.get(*child_id) {
+                    *allele_counts.entry(hap_a).or_insert(0) += 1;
+                    *allele_counts.entry(hap_b).or_insert(0) += 1;
+                }
+            }
+
+            let inherited_count = *allele_counts.get(&inherited_allele).unwrap_or(&0);
+            let non_inherited_count = *allele_counts.get(&non_inherited_allele).unwrap_or(&0);
+
+            // Step 5: If the inherited allele is less frequent, swap them
+            if inherited_count < non_inherited_count {
+                std::mem::swap(&mut inherited_allele, &mut non_inherited_allele);
+
+                // Apply the swap across all children
+                for child_id in &children {
+                    if let Some((hap_a, hap_b)) = updated_iht.children.get_mut(child_id.clone()) {
+                        if *hap_a == inherited_allele {
+                            *hap_a = non_inherited_allele;
+                        } else if *hap_a == non_inherited_allele {
+                            *hap_a = inherited_allele;
+                        }
+
+                        if *hap_b == inherited_allele {
+                            *hap_b = non_inherited_allele;
+                        } else if *hap_b == non_inherited_allele {
+                            *hap_b = inherited_allele;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    updated_iht // Return the modified Iht
+}
+
+fn find_IBD(fam: &Family, iht: &Iht) -> bool {
+    for (founder_id, (founder_hap_a, founder_hap_b)) in &iht.founders {
+        let children = fam.get_children(founder_id);
+
+        // Process only if the founder has multiple children
+        if children.len() > 1 {
+            let mut allele_counts = std::collections::HashMap::new();
+
+            // Step 1: Count occurrences of **only the founder alleles** in children
+            for child_id in &children {
+                if let Some(&(hap_a, hap_b)) = iht.children.get(*child_id) {
+                    if hap_a == *founder_hap_a || hap_a == *founder_hap_b {
+                        *allele_counts.entry(hap_a).or_insert(0) += 1;
+                    }
+                    if hap_b == *founder_hap_a || hap_b == *founder_hap_b {
+                        *allele_counts.entry(hap_b).or_insert(0) += 1;
+                    }
+                }
+            }
+
+            // Step 2: Check if **any** founder allele appears in all children
+            if allele_counts.values().any(|&count| count == children.len()) {
+                return true; // IBD confirmed for this founder
+            }
+        }
+    }
+
+    false // No founder met the IBD condition
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -1141,7 +1348,11 @@ fn main() {
 
             let mut local_iht = Iht::new(family.founders(), family.offspring(), &zygosity);
 
+            // going from markers to iht structure
             load_up(&family, &mut local_iht, &markers.1, &zygosity);
+
+            // backfilling the other founder allele in kinships (multi-child families)
+            let backfilled = backfill_sibs(&family, &local_iht);
 
             marker_file
                 .write(
@@ -1150,31 +1361,58 @@ fn main() {
                         gs.0.chrom,
                         gs.0.start,
                         marker_to_string(&markers.1),
-                        local_iht.collapse_to_string()
+                        backfilled.collapse_to_string()
                     )
                     .as_bytes(),
                 )
                 .unwrap();
 
-            iht_info.merge(&local_iht);
+            if find_IBD(&family, &backfilled) {
+                warn!(
+                    "IBD marker is being skipped, but will be in marker file {} {} {}",
+                    gs.0.chrom,
+                    gs.0.start,
+                    backfilled.collapse_to_string()
+                );
+                continue;
+            }
+
+            iht_info.merge(&backfilled);
 
             pre_vector.push(IhtVec {
                 bed: gs.0,
                 count: 1,
-                iht: local_iht.clone(),
-                non_missing_counts: count_non_missing(&local_iht.founders, &local_iht.children),
+                iht: backfilled.clone(),
+                non_missing_counts: count_non_missing(&backfilled.founders, &backfilled.children),
             });
         }
         info!("{} has {} haplotype marker sites.", c.0, pre_vector.len());
 
-        let mut iht_vecs = collapse_identical_iht(pre_vector);
+        let flipped = optimize_and_merge_ihtvecs(
+            &pre_vector,
+            family.get_founders_with_multiple_children(),
+            &family,
+        );
 
+        // collapsing identical marker sets
+        let mut iht_vecs = collapse_identical_iht(flipped);
+
+        // removing
         apply_threshold_to_vec(&mut iht_vecs, args.run);
 
         let mut filtered_iht_vec = collapse_identical_iht(iht_vecs);
         fill_missing_values(&mut filtered_iht_vec);
 
-        for i in &filtered_iht_vec {
+        let double_flipped: Vec<IhtVec> = optimize_and_merge_ihtvecs(
+            &filtered_iht_vec,
+            family.get_founders_with_multiple_children(),
+            &family,
+        );
+
+        // collapsing identical marker sets
+        let mut final_vecs = collapse_identical_iht(double_flipped);
+
+        for i in &final_vecs {
             iht_file
                 .write(
                     format!(
@@ -1190,7 +1428,8 @@ fn main() {
                 )
                 .unwrap();
         }
-        for recomb in summarize_child_changes(&filtered_iht_vec) {
+
+        for recomb in summarize_child_changes(&final_vecs) {
             recomb_file
                 .write(format!("{} {}\n", c.0, recomb).as_bytes())
                 .unwrap();
