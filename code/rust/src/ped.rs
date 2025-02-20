@@ -1,5 +1,6 @@
 use log::{debug, warn};
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io;
@@ -264,5 +265,24 @@ impl Family {
     /// - `None` if the individual is not found.
     pub fn get_individual(&self, individual_id: &str) -> Option<&Individual> {
         self.individuals.get(individual_id)
+    }
+    /// Returns a list of founders who have multiple children.
+    pub fn get_founders_with_multiple_children(&self) -> Vec<&Individual> {
+        let mut founders_with_children: Vec<&Individual> = Vec::new();
+
+        for founder in self.founders() {
+            let children: HashSet<String> = self
+                .get_children(&founder.id())
+                .into_iter()
+                .map(|s| s.clone()) // Convert &String to String
+                .collect();
+
+            // Only include founders who have more than one child
+            if children.len() > 1 {
+                founders_with_children.push(founder.clone());
+            }
+        }
+
+        founders_with_children
     }
 }
