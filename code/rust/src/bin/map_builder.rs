@@ -17,9 +17,11 @@ use std::io;
 use std::io::Read as IoRead;
 use std::io::Write;
 
+use std::collections::VecDeque;
 use std::path::Path;
 use std::process;
 use std::str;
+use std::usize;
 
 use rust_htslib::bcf::record::GenotypeAllele;
 use rust_htslib::bcf::Record;
@@ -200,21 +202,42 @@ fn remove_unused_samples(
     map.retain(|key, _| key_set.contains(key));
 }
 
-/// Checks if any sample has missing alleles or a sequencing depth of zero.
+/// Checks if any sample has missing alleles, a sequencing depth of zero,
+/// or an abnormally high depth (>2 std deviations above sample mean).
 ///
 /// # Arguments
 /// - `genotype_data`: A `HashMap` mapping sample IDs to their depth and genotype alleles.
-/// - `min depth` : A i32
+/// - `depth_stats`: A `HashMap` from `extract_depth_statistics` containing sample mean and std dev.
+/// - `min_depth`: A minimum depth threshold (e.g., 10).
+///
 /// # Returns
-/// - `true` if any sample has a depth of less than 10 or missing.
-/// - `false` if all samples have valid depths and alleles.
-fn has_missing_alleles(
+/// - `true` if any sample has a depth below `min_depth`, is missing alleles,
+///   or has a depth > 2 std deviations above the sample's mean or below.
+/// - `false` otherwise.
+fn depth_filters(
     genotype_data: &HashMap<String, (i32, Vec<GenotypeAllele>)>,
-    min: i32,
+    depth_stats: &HashMap<String, (f64, f64)>,
+    min_depth: i32,
 ) -> bool {
-    genotype_data.values().any(|(depth, allele_vec)| {
-        *depth < min || allele_vec.iter().any(|allele| allele.index().is_none())
-    })
+    // First pass: Check for missing alleles or depth below min_depth
+    for (sample, (depth, allele_vec)) in genotype_data.iter() {
+        if *depth < min_depth || allele_vec.iter().any(|allele| allele.index().is_none()) {
+            return true;
+        }
+    }
+
+    // Second pass: Check for extreme depth values (more than 2 standard deviations from mean)
+    for (sample, (depth, _)) in genotype_data.iter() {
+        if let Some((mean, std_dev)) = depth_stats.get(sample) {
+            let lower_bound = mean - (1.0 * std_dev);
+            let upper_bound = mean + (1.0 * std_dev);
+            if (*depth as f64) < lower_bound || (*depth as f64) > upper_bound {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 /// Identifies unique alleles for each founder and finds which children inherit them.
@@ -272,6 +295,13 @@ fn find_founder_unique_alleles(
     }
 
     let unique_founder_id = unique_alleles_map.keys().next().unwrap().clone();
+
+    // A marker must be het in the founder, otherwise you don't know which haplotype it's on.
+    let (_depth, alleles) = genotype_data.get(&unique_founder_id).unwrap();
+    if alleles.get(0).unwrap() == alleles.get(1).unwrap() {
+        return (false, HashMap::new());
+    }
+
     let unique_alleles = unique_alleles_map.get(&unique_founder_id).unwrap();
 
     let mut children_with_unique_alleles = Vec::new();
@@ -421,6 +451,7 @@ fn collapse_identical_iht(data: Vec<IhtVec>) -> Vec<IhtVec> {
                     &next.iht.children,
                 )
             {
+                debug!("merging ith blocks");
                 end = next.bed.end;
                 count += next.count;
                 merge_family_maps(&mut merged_founders, &next.iht.founders);
@@ -555,7 +586,7 @@ fn marker_to_string(map: &HashMap<String, (HashSet<GenotypeAllele>, Vec<String>)
 }
 
 /// Fills in '?' values when matching entries exist before and after, iterating until no more changes occur.
-fn fill_missing_values(iht_vecs: &mut Vec<IhtVec>) {
+fn fill_missing_values_by_neighbor(iht_vecs: &mut Vec<IhtVec>) {
     if iht_vecs.len() < 3 {
         return;
     }
@@ -631,6 +662,59 @@ fn fill_missing_values(iht_vecs: &mut Vec<IhtVec>) {
     }
 }
 
+/// Fills in '?' values when matching entries exist before and after, iterating until no more changes occur.
+fn fill_missing_values(iht_vecs: &mut Vec<IhtVec>, pre_filter: Vec<IhtVec>) {
+    for iht_vec in iht_vecs.iter_mut() {
+        for (child, (hap_a, hap_b)) in iht_vec.iht.children.iter_mut() {
+            let mut consensus_a = None;
+            let mut consensus_b = None;
+
+            if *hap_a == '?' || *hap_b == '?' {
+                let mut marker_counts_a: HashMap<char, usize> = HashMap::new();
+                let mut marker_counts_b: HashMap<char, usize> = HashMap::new();
+
+                for pre in pre_filter.iter() {
+                    if pre.bed.start >= iht_vec.bed.start && pre.bed.end <= iht_vec.bed.end {
+                        if let Some((pre_a, pre_b)) = pre.iht.children.get(child) {
+                            if *pre_a != '?' {
+                                *marker_counts_a.entry(*pre_a).or_insert(0) += 1;
+                            }
+                            if *pre_b != '?' {
+                                *marker_counts_b.entry(*pre_b).or_insert(0) += 1;
+                            }
+                        }
+                    }
+                }
+
+                if !marker_counts_a.is_empty() {
+                    consensus_a = marker_counts_a
+                        .iter()
+                        .max_by_key(|entry| entry.1)
+                        .map(|(k, _)| *k);
+                }
+                if !marker_counts_b.is_empty() {
+                    consensus_b = marker_counts_b
+                        .iter()
+                        .max_by_key(|entry| entry.1)
+                        .map(|(k, _)| *k);
+                }
+
+                if *hap_a == '?' {
+                    if let Some(consensus) = consensus_a {
+                        *hap_a = consensus;
+                    }
+                }
+
+                if *hap_b == '?' {
+                    if let Some(consensus) = consensus_b {
+                        *hap_b = consensus;
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Analyzes a reference to `Vec<IhtVec>` and detects children whose characters change between consecutive segments.
 /// Outputs a vector of space-separated strings in the format:
 /// `last_end next_start child_id old_char new_char`
@@ -663,30 +747,40 @@ fn summarize_child_changes(iht_vecs: &Vec<IhtVec>) -> Vec<String> {
     summaries
 }
 
-fn optimize_and_merge_ihtvecs(
-    iht_vecs: &Vec<IhtVec>,
-    founders: Vec<&Individual>,
-    family: &Family,
-) -> Vec<IhtVec> {
-    let mut optimized_vecs: Vec<IhtVec> = Vec::new();
+fn perform_flips_in_place(iht_vecs: &mut Vec<IhtVec>, founders: Vec<&Individual>, family: &Family) {
+    for i in 0..iht_vecs.len() {
+        let (before, current) = iht_vecs.split_at_mut(i);
+        let current = &mut current[0]; // Safe mutable borrow of `current`
 
-    for mut current in iht_vecs.iter().cloned() {
-        if let Some(previous) = optimized_vecs.last_mut() {
+        let current_flipable = current.iht.get_flipable_alleles(family);
+
+        // Find the most recent previous that is either identical, a superset, or a subset
+        if let Some(previous) = before.iter_mut().rev().find(|prev| {
+            let prev_flipable = prev.iht.get_flipable_alleles(family);
+            !prev_flipable.is_empty()
+                && !current_flipable.is_empty()
+                && (prev_flipable == current_flipable
+                    || prev_flipable.is_superset(&current_flipable)
+                    || current_flipable.is_superset(&prev_flipable))
+        }) {
             let original_mismatches = count_mismatches(&previous.iht, &current.iht);
             let mut swapped_iht = current.iht.clone();
 
             for founder in &founders {
+                if original_mismatches == 0 {
+                    break;
+                }
+
                 let founder_id = founder.id();
 
                 // Get the founder's alleles
                 if let Some((founder_allele_a, founder_allele_b)) =
                     swapped_iht.founders.get(&founder_id)
                 {
-                    // Clone before modifying to avoid borrowing conflicts
                     let mut temp_iht = swapped_iht.clone();
 
                     // Swap the founder alleles across all children
-                    for (child_id, (hap_a, hap_b)) in temp_iht.children.iter_mut() {
+                    for (_, (hap_a, hap_b)) in temp_iht.children.iter_mut() {
                         if *hap_a == *founder_allele_a {
                             *hap_a = *founder_allele_b;
                         } else if *hap_a == *founder_allele_b {
@@ -704,32 +798,13 @@ fn optimize_and_merge_ihtvecs(
 
                     // Apply swap across children only if it reduces mismatches
                     if swapped_mismatches < original_mismatches {
-                        /*
-                        println!(
-                            "{} {} {}/{} c:{} o:{}\no:{}\nm:{}",
-                            current.bed.start,
-                            founder_id,
-                            founder_allele_a,
-                            founder_allele_b,
-                            swapped_mismatches,
-                            original_mismatches,
-                            current.iht.collapse_to_string(),
-                            temp_iht.collapse_to_string()
-                        );
-                        */
                         swapped_iht = temp_iht;
                     }
                 }
             }
-
-            // Otherwise, update `current.iht`
             current.iht = swapped_iht;
         }
-
-        optimized_vecs.push(current);
     }
-
-    optimized_vecs
 }
 
 /// Counts the number of mismatches between two Iht structures
@@ -780,6 +855,9 @@ fn backfill_sibs(fam: &Family, iht: &Iht) -> Iht {
                 *founder_hap_a
             };
 
+            let mut iht_allele_children: HashSet<String> = HashSet::new();
+            let mut non_iht_allele_children: HashSet<String> = HashSet::new();
+
             // Step 3: Assign the other founder allele to children who do not have the inherited allele
             for child_id in &children {
                 if let Some(child_hap) = updated_iht.children.get_mut(child_id.clone()) {
@@ -787,8 +865,11 @@ fn backfill_sibs(fam: &Family, iht: &Iht) -> Iht {
 
                     // Check if the child already has the inherited allele
                     if *child_hap_a == inherited_allele || *child_hap_b == inherited_allele {
+                        iht_allele_children.insert((*child_id).clone());
                         continue;
                     }
+
+                    non_iht_allele_children.insert((*child_id).clone());
 
                     // Assign the missing founder allele to the correct index
                     if allele_index == 0 {
@@ -812,7 +893,11 @@ fn backfill_sibs(fam: &Family, iht: &Iht) -> Iht {
             let non_inherited_count = *allele_counts.get(&non_inherited_allele).unwrap_or(&0);
 
             // Step 5: If the inherited allele is less frequent, swap them
-            if inherited_count < non_inherited_count {
+            if inherited_count < non_inherited_count
+                || (inherited_count == non_inherited_count)
+                    && iht_allele_children.iter().min().unwrap()
+                        > non_iht_allele_children.iter().min().unwrap()
+            {
                 std::mem::swap(&mut inherited_allele, &mut non_inherited_allele);
 
                 // Apply the swap across all children
@@ -838,7 +923,7 @@ fn backfill_sibs(fam: &Family, iht: &Iht) -> Iht {
     updated_iht // Return the modified Iht
 }
 
-fn find_IBD(fam: &Family, iht: &Iht) -> bool {
+fn all_sibs_have_same_haplotype(fam: &Family, iht: &Iht) -> bool {
     for (founder_id, (founder_hap_a, founder_hap_b)) in &iht.founders {
         let children = fam.get_children(founder_id);
 
@@ -860,12 +945,85 @@ fn find_IBD(fam: &Family, iht: &Iht) -> bool {
 
             // Step 2: Check if **any** founder allele appears in all children
             if allele_counts.values().any(|&count| count == children.len()) {
-                return true; // IBD confirmed for this founder
+                return true;
             }
         }
     }
 
-    false // No founder met the IBD condition
+    false
+}
+
+fn collect_alleles_with_positions(
+    iht_vecs: &Vec<IhtVec>,
+    sample: &str,
+    index: usize,
+) -> VecDeque<(i64, char)> {
+    let mut allele_positions = VecDeque::new();
+
+    for iht_vec in iht_vecs {
+        if let Some((hap_a, hap_b)) = iht_vec.iht.children.get(sample) {
+            let allele = if index == 0 { *hap_a } else { *hap_b };
+            if allele != '?' {
+                allele_positions.push_back((iht_vec.bed.start, allele));
+            }
+        }
+    }
+
+    allele_positions
+}
+
+fn count_matching_neighbors(
+    allele_positions: &VecDeque<(i64, char)>,
+    min_run: usize,
+) -> Vec<(i64, char, usize, usize)> {
+    let mut results = Vec::new();
+
+    for (i, &(pos, allele)) in allele_positions.iter().enumerate() {
+        let mut count_before = 1;
+        let mut count_after = 1;
+
+        // Count matches before
+        for j in (0..i).rev() {
+            if allele_positions[j].1 == allele {
+                count_before += 1;
+            } else {
+                break;
+            }
+        }
+
+        // Count matches after
+        for j in (i + 1)..allele_positions.len() {
+            if allele_positions[j].1 == allele {
+                count_after += 1;
+            } else {
+                break;
+            }
+        }
+        if count_before < min_run && count_after < min_run {
+            results.push((pos, allele, count_before, count_after));
+        }
+    }
+
+    results
+}
+
+fn mask_child_alleles(
+    sites: &HashSet<i64>,
+    child_id: &str,
+    allele_index: usize,
+    iht_vecs: &mut Vec<IhtVec>,
+) {
+    for iht_vec in iht_vecs.iter_mut() {
+        if sites.contains(&iht_vec.bed.start) {
+            if let Some((hap_a, hap_b)) = iht_vec.iht.children.get_mut(child_id) {
+                if allele_index == 0 {
+                    *hap_a = '?';
+                } else if allele_index == 1 {
+                    *hap_b = '?';
+                }
+            }
+        }
+    }
 }
 
 fn main() {
@@ -951,7 +1109,7 @@ fn main() {
         .unwrap();
 
     marker_file
-        .write(format!("#chom pos founder allele matches {}\n", master_iht.legend()).as_bytes())
+        .write(format!("#chom pos founder allele {} matches\n", master_iht.legend()).as_bytes())
         .unwrap();
 
     recomb_file
@@ -964,6 +1122,12 @@ fn main() {
     let chromosomes = extract_chromosome_names(&args.vcf).unwrap();
 
     for c in chromosomes {
+        info!(
+            "Calculating sample depths across {} genome from \"DP\"",
+            c.0
+        );
+        let depth_info = extract_depth_statistics(&mut reader, c.1).unwrap();
+
         let mut zygosity = ChromType::Autosome;
 
         if c.0.contains("chrX") || c.0.contains("ChrX") {
@@ -982,10 +1146,12 @@ fn main() {
 
         let mut pre_vector: Vec<IhtVec> = Vec::new();
 
+        let mut marker_info = HashMap::new();
+
         for mut gs in genotype_data {
             remove_unused_samples(&mut gs.1, &family.get_individuals_ids());
 
-            if has_missing_alleles(&gs.1, args.depth) {
+            if depth_filters(&gs.1, &depth_info, args.depth) {
                 continue;
             }
 
@@ -1005,22 +1171,9 @@ fn main() {
             // backfilling the other founder allele in kinships (multi-child families)
             let backfilled = backfill_sibs(&family, &local_iht);
 
-            marker_file
-                .write(
-                    format!(
-                        "{} {} {} {}\n",
-                        gs.0.chrom,
-                        gs.0.start,
-                        marker_to_string(&markers.1),
-                        backfilled.collapse_to_string()
-                    )
-                    .as_bytes(),
-                )
-                .unwrap();
-
-            if find_IBD(&family, &backfilled) {
+            if all_sibs_have_same_haplotype(&family, &backfilled) {
                 warn!(
-                    "IBD marker is being skipped, but will be in marker file {} {} {}",
+                    "Skipping odd marker {} {} {}",
                     gs.0.chrom,
                     gs.0.start,
                     backfilled.collapse_to_string()
@@ -1028,7 +1181,7 @@ fn main() {
                 continue;
             }
 
-            iht_info.merge(&backfilled);
+            marker_info.insert(gs.0.start, marker_to_string(&markers.1));
 
             pre_vector.push(IhtVec {
                 bed: gs.0,
@@ -1039,48 +1192,76 @@ fn main() {
         }
         info!("{} has {} haplotype marker sites.", c.0, pre_vector.len());
 
-        let flipped = optimize_and_merge_ihtvecs(
-            &pre_vector,
+        info!("first allele flip");
+        perform_flips_in_place(
+            &mut pre_vector,
             family.get_founders_with_multiple_children(),
             &family,
         );
 
-        // collapsing identical marker sets
-        let mut iht_vecs = collapse_identical_iht(flipped);
-
-        // removing
-        apply_threshold_to_vec(&mut iht_vecs, args.run);
-
-        let mut filtered_iht_vec = collapse_identical_iht(iht_vecs);
-        fill_missing_values(&mut filtered_iht_vec);
-
-        let double_flipped: Vec<IhtVec> = optimize_and_merge_ihtvecs(
-            &filtered_iht_vec,
-            family.get_founders_with_multiple_children(),
-            &family,
-        );
-
-        // collapsing identical marker sets
-        let mut final_vecs = collapse_identical_iht(double_flipped);
-
-        for i in &final_vecs {
-            iht_file
+        for m in &pre_vector {
+            marker_file
                 .write(
                     format!(
-                        "{} {} {} {} {} {}\n",
-                        i.bed.chrom,
-                        i.bed.start,
-                        i.bed.end,
-                        i.iht.collapse_to_string(),
-                        i.count,
-                        i.bed.end - i.bed.start,
+                        "{} {} {} {}\n",
+                        m.bed.chrom,
+                        m.bed.start,
+                        m.iht.collapse_to_string(),
+                        marker_info.get(&m.bed.start).unwrap(),
                     )
                     .as_bytes(),
                 )
                 .unwrap();
         }
 
-        for recomb in summarize_child_changes(&final_vecs) {
+        let stable_iht = pre_vector.clone();
+
+        info!("finding marker runs.");
+        for d in family.offspring() {
+            for i in [0 as usize, 1 as usize].iter() {
+                let alleles = collect_alleles_with_positions(&pre_vector, &d.id(), *i);
+                let neighbor_counts: Vec<(i64, char, usize, usize)> =
+                    count_matching_neighbors(&alleles, args.run);
+                let mut to_mask: HashSet<i64> = HashSet::new();
+
+                for (key, _, _, _) in neighbor_counts {
+                    to_mask.insert(key);
+                }
+                info!("masking {} family member haplotype {}", d.id(), i);
+                mask_child_alleles(&to_mask, &d.id(), *i, &mut pre_vector);
+            }
+        }
+
+        let mut iht_vecs = collapse_identical_iht(pre_vector);
+
+        perform_flips_in_place(
+            &mut iht_vecs,
+            family.get_founders_with_multiple_children(),
+            &family,
+        );
+
+        fill_missing_values(&mut iht_vecs, stable_iht);
+        fill_missing_values_by_neighbor(&mut iht_vecs);
+
+        for i in &iht_vecs {
+            iht_file
+                .write(
+                    format!(
+                        "{} {} {} {} {} {} {}\n",
+                        i.bed.chrom,
+                        i.bed.start,
+                        i.bed.end,
+                        i.iht.collapse_to_string(),
+                        i.count,
+                        i.bed.end - i.bed.start,
+                        i.iht.get_non_missing_child_alleles().iter().join(","),
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+        }
+
+        for recomb in summarize_child_changes(&iht_vecs) {
             recomb_file
                 .write(format!("{} {}\n", c.0, recomb).as_bytes())
                 .unwrap();

@@ -465,7 +465,7 @@ impl Iht {
             }
         }
 
-        println!(" {:?}", founder_allele_map);
+        //println!(" {:?}", founder_allele_map);
 
         // Step 2: Assign genotypes based on `founder_allele_map`
         for (individual, (hap1, hap2)) in self.founders.iter().chain(self.children.iter()) {
@@ -490,7 +490,6 @@ impl Iht {
 
         (founder_allele_map, updated_genotypes)
     }
-
     /// Generate all possible founder allele orientations
     pub fn founder_phase_orientations(&self) -> Vec<Iht> {
         let mut results = Vec::new();
@@ -524,6 +523,53 @@ impl Iht {
         }
 
         results
+    }
+
+    /// Returns a HashSet of all non-'?' characters present in the children.
+    pub fn get_non_missing_child_alleles(&self) -> HashSet<char> {
+        let mut non_missing: HashSet<char> = HashSet::new();
+
+        for (_, (hap_a, hap_b)) in &self.children {
+            if *hap_a != '?' {
+                non_missing.insert(*hap_a);
+            }
+            if *hap_b != '?' {
+                non_missing.insert(*hap_b);
+            }
+        }
+
+        non_missing
+    }
+
+    /// Returns a HashSet of all non-'?' characters present in the children
+    /// **only for children of founders with multiple children**.
+    pub fn get_flipable_alleles(&self, family: &Family) -> HashSet<char> {
+        let mut non_missing: HashSet<char> = HashSet::new();
+
+        // Identify founders with multiple children
+        let founders_with_multiple_children: HashSet<String> = family
+            .get_founders_with_multiple_children()
+            .into_iter()
+            .map(|f| f.id())
+            .collect();
+
+        // Iterate through children and only collect alleles for those with multi-child founders
+        for (child_id, (hap_a, hap_b)) in &self.children {
+            if let Some((father, mother)) = family.get_parents(child_id) {
+                if founders_with_multiple_children.contains(&father)
+                    || founders_with_multiple_children.contains(&mother)
+                {
+                    if *hap_a != '?' {
+                        non_missing.insert(*hap_a);
+                    }
+                    if *hap_b != '?' {
+                        non_missing.insert(*hap_b);
+                    }
+                }
+            }
+        }
+
+        non_missing
     }
 }
 

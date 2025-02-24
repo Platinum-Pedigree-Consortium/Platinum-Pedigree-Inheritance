@@ -13,7 +13,9 @@ use log::info;
 use log::warn;
 use log::LevelFilter;
 use std::collections::HashMap;
+use std::fs::OpenOptions;
 use std::io;
+use std::io::Write;
 use std::process;
 use std::str;
 
@@ -262,6 +264,7 @@ fn is_ignored_missing(allele: &GenotypeAllele) -> bool {
 fn find_best_phase_orientation(
     genotypes: &HashMap<String, (i32, Vec<GenotypeAllele>)>,
     iht_vec: &IhtVec,
+    fam: &Family,
 ) -> (Option<Iht>, Vec<String>) {
     let founder_phases = iht_vec.iht.founder_phase_orientations();
     let mut best_phase: Option<Iht> = None;
@@ -272,12 +275,13 @@ fn find_best_phase_orientation(
     let converted_genotypes = convert_genotype_map(genotypes);
 
     for phase in &founder_phases {
-        println!("\n{}", "+".repeat(100));
-        println!("{}", phase);
+        // println!("\n{}", "+".repeat(100));
+        // println!("P: {}", phase.collapse_to_string());
         let new_genotypes = phase.assign_genotypes(&converted_genotypes);
         let mismatch_vec = compare_genotype_maps(&converted_genotypes, &new_genotypes.1);
         let mismatch_count = mismatch_vec.len();
 
+        /*
         print_genotype_maps(&converted_genotypes, &new_genotypes.1, phase);
 
         println!(
@@ -285,11 +289,13 @@ fn find_best_phase_orientation(
             mismatch_count,
             mismatch_vec.join(","),
         );
+        */
 
         let mut sorted_keys: Vec<char> = new_genotypes.0.keys().cloned().collect();
         sorted_keys.sort(); // Sorting characters naturally
 
         // Print each key-value pair in sorted order
+        /*
         for key in sorted_keys {
             println!(
                 "iht2allele {} -> {:?}",
@@ -297,6 +303,8 @@ fn find_best_phase_orientation(
                 new_genotypes.0.get(&key).unwrap()
             );
         }
+        println!("\n");
+        */
 
         // Store the phase with the lowest mismatch
         if mismatch_count < lowest_mismatch {
@@ -305,8 +313,16 @@ fn find_best_phase_orientation(
             best_mismatch_vec = mismatch_vec.clone();
         }
     }
-    println!("\n{}", "+".repeat(100));
+    // println!("\n{}", "+".repeat(100));
     (best_phase, best_mismatch_vec)
+}
+
+fn calculate_fraction(numerator: f64, denominator: f64) -> Option<f64> {
+    if denominator == 0.0 {
+        None // Return None if division by zero
+    } else {
+        Some(numerator / denominator)
+    }
 }
 
 fn main() {
@@ -343,17 +359,50 @@ fn main() {
     let mut output_vcf = args.prefix.clone();
     output_vcf += ".vcf";
 
+    let mut output_stats_fn = args.prefix.clone();
+    output_stats_fn += ".filtering_stats.txt";
+
+    let mut failed_sites_fn = args.prefix.clone();
+    failed_sites_fn += ".failed_sites.txt";
+
+    // Open the file with write and create options
+    let mut stats_fh = OpenOptions::new()
+        .write(true) // Open for writing
+        .create(true) // Create if it doesn't exist
+        .open(output_stats_fn)
+        .unwrap();
+
+    // Open the file with write and create options
+    let mut failed_fh = OpenOptions::new()
+        .write(true) // Open for writing
+        .create(true) // Create if it doesn't exist
+        .open(failed_sites_fn)
+        .unwrap();
+
+    failed_fh
+        .write(format!("chrom start sample n-samples iht-region\n").as_bytes())
+        .unwrap();
+
+    stats_fh
+        .write(format!("#chrom start end passing failing nocall passing-rate one-off\n").as_bytes())
+        .unwrap();
+
     let iht_info = parse_ihtv2_file(&args.inheritance, family.founders().len());
+
+    let mut total_passing_count = 0;
+    let mut total_failing_count = 0;
+    let mut total_nocall_count = 0;
 
     for v in iht_info {
         debug!("{} {} {} {}", v.bed.chrom, v.bed.start, v.bed.end, v.iht,);
 
         let genotypes = parse_vcf(&mut reader, &v.bed, args.qual).unwrap();
-        let founder_phases = v.iht.founder_phase_orientations();
 
         let mut passing_count = 0;
         let mut failing_count = 0;
         let mut nocall_count = 0;
+
+        let mut failed_singletons: HashMap<String, i32> = HashMap::new();
 
         for records in &genotypes {
             if has_missing_alleles(&records.1, 5) {
@@ -361,23 +410,53 @@ fn main() {
                 continue;
             }
 
-            let best_results = find_best_phase_orientation(&records.1, &v);
+            let best_results = find_best_phase_orientation(&records.1, &v, &family);
             if !best_results.1.is_empty() {
                 let mut issues = best_results.1;
                 issues.sort();
+
+                for s in issues.iter() {
+                    failed_fh
+                        .write(
+                            format!(
+                                "{} {} {} {} {}-{}\n",
+                                records.0.chrom,
+                                records.0.start,
+                                s,
+                                issues.len(),
+                                v.bed.start,
+                                v.bed.end,
+                            )
+                            .as_bytes(),
+                        )
+                        .unwrap();
+                }
+
+                if issues.len() == 1 {
+                    for i in &issues {
+                        *failed_singletons.entry(i.clone()).or_insert(0) += 1;
+                    }
+                }
+
                 let converted_genos = convert_genotype_map(&records.1);
                 let expected = best_results
                     .0
                     .as_ref()
                     .unwrap()
                     .assign_genotypes(&converted_genos);
-                println!(
-                    "\n\nBR {} {} {}",
-                    records.0.start,
-                    issues.len(),
-                    issues.join(","),
-                );
-                print_genotype_maps(&converted_genos, &expected.1, &best_results.0.unwrap());
+
+                if issues.len() == 1 {
+                    print_genotype_maps(&converted_genos, &expected.1, &best_results.0.unwrap());
+                    println!(
+                        "FS {}:{}-{} {} {} {}\n",
+                        v.bed.chrom,
+                        v.bed.start,
+                        v.bed.end,
+                        records.0.start,
+                        issues.len(),
+                        issues.join(","),
+                    );
+                }
 
                 failing_count += 1;
             } else {
@@ -392,9 +471,45 @@ fn main() {
             v.bed.end,
             genotypes.len()
         );
+
+        total_passing_count += passing_count;
+        total_failing_count += failing_count;
+        total_nocall_count += nocall_count;
+
         info!(
             "Passing {} Failing {} Nocall {}",
             passing_count, failing_count, nocall_count
         );
+
+        let singletons = failed_singletons
+            .iter()
+            .map(|(key, value)| format!("{}:{}", key, value))
+            .collect::<Vec<_>>()
+            .join(";");
+
+        stats_fh
+            .write(
+                format!(
+                    "{} {} {} {} {} {} {:.3} {}\n",
+                    v.bed.chrom,
+                    v.bed.start,
+                    v.bed.end,
+                    passing_count,
+                    failing_count,
+                    nocall_count,
+                    calculate_fraction(
+                        passing_count as f64,
+                        (passing_count + failing_count) as f64
+                    )
+                    .unwrap(),
+                    singletons,
+                )
+                .as_bytes(),
+            )
+            .unwrap();
     }
+    info!(
+        "Total - passing: {} failing: {} nocall {}",
+        total_passing_count, total_failing_count, total_nocall_count
+    );
 }
