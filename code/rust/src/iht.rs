@@ -442,6 +442,7 @@ impl Iht {
     pub fn assign_genotypes(
         &self,
         founder_genotypes: &HashMap<String, Vec<GenotypeAllele>>,
+        sort_alleles: bool,
     ) -> (
         HashMap<char, GenotypeAllele>,
         HashMap<String, Vec<GenotypeAllele>>,
@@ -479,7 +480,7 @@ impl Iht {
                 .unwrap_or(GenotypeAllele::UnphasedMissing);
 
             // Ensure consistent ordering
-            let sorted_genotypes = if allele1.index() > allele2.index() {
+            let sorted_genotypes = if allele1.index() > allele2.index() && sort_alleles {
                 vec![allele2, allele1]
             } else {
                 vec![allele1, allele2]
