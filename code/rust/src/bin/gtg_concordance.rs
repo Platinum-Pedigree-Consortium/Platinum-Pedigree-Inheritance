@@ -16,11 +16,12 @@ use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::Write;
+use std::path::Path;
 use std::process;
 use std::str;
 
 use rust_htslib::bcf::record::GenotypeAllele;
-use rust_htslib::bcf::{IndexedReader, Read};
+use rust_htslib::bcf::{Format, Header, IndexedReader, Read, Writer};
 
 /// Filter and Phase regions in haplotype map.
 #[derive(Parser, Debug)]
@@ -51,7 +52,7 @@ struct Args {
     qual: f32,
 
     /// Minimum depth for all family members
-    #[arg(short, long, default_value_t = 10)]
+    #[arg(short, long, default_value_t = 5)]
     depth: i32,
 
     /// Verbosity
@@ -70,106 +71,44 @@ fn convert_genotype_map(
         .collect()
 }
 
-/// Reads all records in a specific chromosome from a VCF file and extracts genotype alleles.
-/// Converts the chromosome name to a sequence index before fetching records.
-/// Returns a vector where each element is a tuple of:
-/// - A `BedRecord` containing the position.
-/// - A HashMap where keys are sample IDs and values are `(depth, alleles)`.
-fn parse_vcf(
-    reader: &mut IndexedReader,
-    region: &BedRecord,
-    minqual: f32,
-) -> io::Result<Vec<(BedRecord, HashMap<String, (i32, Vec<GenotypeAllele>)>)>> {
-    // Convert chromosome name to sequence index
-    let chrom_id = match reader.header().name2rid(region.chrom.as_bytes()) {
-        Ok(id) => id,
-        Err(_) => {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "Chromosome not found",
-            ))
+/// Extracts genotype data from a single VCF record.
+fn parse_vcf_record(
+    chrom: &String,
+    record: &rust_htslib::bcf::Record,
+    samples: &Vec<String>,
+) -> (BedRecord, HashMap<String, (i32, Vec<GenotypeAllele>)>) {
+    let mut record_map: HashMap<String, (i32, Vec<GenotypeAllele>)> = HashMap::new();
+
+    if let Some(depths) = get_sample_depths(record, samples) {
+        if let Ok(genotypes) = record.genotypes() {
+            for (i, sample) in samples.iter().enumerate() {
+                let geno: rust_htslib::bcf::record::Genotype = genotypes.get(i);
+                let mut alleles: Vec<GenotypeAllele> = geno.iter().cloned().collect();
+                alleles.sort_by_key(|a| a.index().unwrap_or(i32::MAX.try_into().unwrap()));
+                record_map.insert(sample.clone(), (*depths.get(sample).unwrap_or(&0), alleles));
+            }
         }
-    };
-    // Convert start and end positions safely
-    let start: u64 = region.start.try_into().unwrap_or(0); // Ensure start is valid
-    let end: Option<u64> = if region.end >= 0 {
-        Some(region.end.try_into().unwrap_or(u64::MAX)) // Ensure end is valid
-    } else {
-        None // No end limit
-    };
-
-    // Fetch the records using the sequence index and converted start/end
-    let rv = reader.fetch(chrom_id, start, end);
-
-    // Initialize a vector to store genotype data for each site
-    let mut records_genotype_map: Vec<(BedRecord, HashMap<String, (i32, Vec<GenotypeAllele>)>)> =
-        Vec::new();
-
-    if rv.is_err() {
-        return Ok(records_genotype_map); // Return empty if fetch fails
     }
 
-    // Extract sample names from the VCF header
-    let header = reader.header();
-    let samples: Vec<String> = header
-        .samples()
-        .iter()
-        .map(|s| String::from_utf8_lossy(s).to_string())
-        .collect();
-
-    // Iterate through all records in the specified chromosome region
-    for result in reader.records() {
-        let record = match result {
-            Ok(rec) => rec,
-            Err(_) => continue, // Skip invalid records
-        };
-
-        if record.qual() < minqual {
-            continue;
-        }
-
-        let depths = match get_sample_depths(&record, &samples) {
-            Some(d) => d,
-            None => continue,
-        };
-
-        let genotypes = match record.genotypes() {
-            Ok(g) => g,
-            Err(_) => continue,
-        };
-
-        let mut record_map: HashMap<String, (i32, Vec<GenotypeAllele>)> = HashMap::new();
-
-        // Extract genotype alleles for each sample
-        for (i, sample) in samples.iter().enumerate() {
-            let geno: rust_htslib::bcf::record::Genotype = genotypes.get(i);
-            let mut alleles: Vec<GenotypeAllele> = geno.iter().cloned().collect();
-            alleles.sort_by_key(|a| a.index().unwrap_or(i32::MAX.try_into().unwrap()));
-
-            record_map.insert(sample.clone(), (*depths.get(sample).unwrap_or(&0), alleles));
-        }
-
-        // Store results
-        records_genotype_map.push((
-            BedRecord {
-                chrom: region.chrom.clone(),
-                start: record.pos() as i64,
-                end: record.pos() as i64,
-            },
-            record_map,
-        ));
-    }
-
-    Ok(records_genotype_map)
+    (
+        BedRecord {
+            chrom: chrom.clone(),
+            start: record.pos() as i64,
+            end: record.pos() as i64,
+        },
+        record_map,
+    )
 }
 
-/// Prints two `HashMap<String, Vec<GenotypeAllele>>` side by side for comparison,
-/// adding columns for mismatches (using `genotypes_match` logic) and Iht characters.
-fn print_genotype_maps(
+/// Returns a formatted string comparing two `HashMap<String, Vec<GenotypeAllele>>`
+/// side by side, adding columns for mismatches and Iht characters.
+fn format_genotype_maps(
     map1: &HashMap<String, Vec<GenotypeAllele>>,
     map2: &HashMap<String, Vec<GenotypeAllele>>,
     iht: &Iht, // Iht structure containing founder and child allele characters
-) {
+) -> String {
+    let mut output = String::new();
+
     // Get a sorted list of all unique keys from both maps
     let mut all_keys: Vec<String> = map1.keys().chain(map2.keys()).cloned().collect();
     all_keys.sort();
@@ -185,14 +124,15 @@ fn print_genotype_maps(
         }
     }
 
-    // Print the header
-    println!(
-        "{:<15} {:<25} {:<25} {:<10} {:<10}",
-        "Sample", "Seen", "Expected", "Matching", "Iht"
-    );
-    println!("{}", "-".repeat(100));
+    // Format the header
+    output.push_str(&format!(
+        "{:<15} {:<25} {:<25} {:<10} {:<10}\n",
+        "Sample", "Seen", "Expected", "Mismatch", "Inheritance"
+    ));
+    output.push_str(&"-".repeat(100));
+    output.push('\n');
 
-    // Loop through all keys and print side-by-side values
+    // Loop through all keys and format side-by-side values
     for key in all_keys {
         let alleles1 = map1
             .get(&key)
@@ -213,11 +153,13 @@ fn print_genotype_maps(
             .get_alleles(&key)
             .map_or_else(|| "--".to_string(), |(a, b)| format!("{}{}", a, b));
 
-        println!(
-            "{:<15} {:<25} {:<25} {:<10} {:<10}",
+        output.push_str(&format!(
+            "{:<15} {:<25} {:<25} {:<10} {:<10}\n",
             key, alleles1, alleles2, mismatch_marker, iht_chars
-        );
+        ));
     }
+
+    output
 }
 
 /// Compare two genotype maps and return a vector of IDs that don't match.
@@ -277,7 +219,7 @@ fn find_best_phase_orientation(
     for phase in &founder_phases {
         // println!("\n{}", "+".repeat(100));
         // println!("P: {}", phase.collapse_to_string());
-        let new_genotypes = phase.assign_genotypes(&converted_genotypes);
+        let new_genotypes = phase.assign_genotypes(&converted_genotypes, true);
         let mismatch_vec = compare_genotype_maps(&converted_genotypes, &new_genotypes.1);
         let mismatch_count = mismatch_vec.len();
 
@@ -325,6 +267,33 @@ fn calculate_fraction(numerator: f64, denominator: f64) -> Option<f64> {
     }
 }
 
+fn write_vcfs(
+    reader: &mut IndexedReader,
+    passing: &mut Writer,
+    failing: &mut Writer,
+    region: &BedRecord,
+) {
+    // Convert chromosome name to sequence index
+    let chrom_id = reader.header().name2rid(region.chrom.as_bytes()).unwrap();
+    // Convert start and end positions safely
+    let start: u64 = region.start.try_into().unwrap_or(0); // Ensure start is valid
+    let end: Option<u64> = if region.end >= 0 {
+        Some(region.end.try_into().unwrap_or(u64::MAX)) // Ensure end is valid
+    } else {
+        None // No end limit
+    };
+
+    // Fetch the records using the sequence index and converted start/end
+    let rv = reader.fetch(chrom_id, start, end).unwrap();
+
+    for result in reader.records() {
+        let record = match result {
+            Ok(rec) => rec,
+            Err(_) => continue, // Skip invalid records
+        };
+    }
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -356,8 +325,32 @@ fn main() {
     let mut reader: IndexedReader =
         IndexedReader::from_path(&args.vcf).expect("Failure to read VCF file.");
 
-    let mut output_vcf = args.prefix.clone();
-    output_vcf += ".vcf";
+    let header = reader.header().clone();
+    let wheader: Header = Header::from_template(&header);
+
+    // Extract sample names from the VCF header
+    let header = reader.header();
+    let samples: Vec<String> = header
+        .samples()
+        .iter()
+        .map(|s| String::from_utf8_lossy(s).to_string())
+        .collect();
+
+    let mut outpassingvcf = Writer::from_path(
+        Path::new(&format!("{}.pass.vcf", args.prefix)),
+        &wheader,
+        true,
+        Format::Vcf,
+    )
+    .unwrap();
+
+    let mut outfailvcf = Writer::from_path(
+        Path::new(&format!("{}.fail.vcf", args.prefix)),
+        &wheader,
+        true,
+        Format::Vcf,
+    )
+    .unwrap();
 
     let mut output_stats_fn = args.prefix.clone();
     output_stats_fn += ".filtering_stats.txt";
@@ -392,25 +385,48 @@ fn main() {
     let mut total_passing_count = 0;
     let mut total_failing_count = 0;
     let mut total_nocall_count = 0;
+    let mut total_low_qual_count = 0;
 
     for v in iht_info {
-        debug!("{} {} {} {}", v.bed.chrom, v.bed.start, v.bed.end, v.iht,);
-
-        let genotypes = parse_vcf(&mut reader, &v.bed, args.qual).unwrap();
+        debug!("{} {} {} {}", v.bed.chrom, v.bed.start, v.bed.end, v.iht);
 
         let mut passing_count = 0;
         let mut failing_count = 0;
         let mut nocall_count = 0;
+        let mut low_qual_count = 0;
 
         let mut failed_singletons: HashMap<String, i32> = HashMap::new();
 
-        for records in &genotypes {
-            if has_missing_alleles(&records.1, 5) {
-                nocall_count += 1;
+        // Convert start and end positions safely
+        let start: u64 = v.bed.start.try_into().unwrap_or(0); // Ensure start is valid
+        let end: Option<u64> = if v.bed.end >= 0 {
+            Some(v.bed.end.try_into().unwrap_or(u64::MAX)) // Ensure end is valid
+        } else {
+            None // No end limit
+        };
+
+        let chrom_id = reader.header().name2rid(v.bed.chrom.as_bytes()).unwrap();
+
+        // Fetch the records using the sequence index and converted start/end
+        let rv = reader.fetch(chrom_id, start, end);
+
+        for r in reader.records() {
+            let record = r.unwrap();
+            let parsed_record = parse_vcf_record(&v.bed.chrom, &record, &samples);
+
+            if record.qual() < args.qual {
+                low_qual_count += 1;
+                outfailvcf.write(&record);
                 continue;
             }
 
-            let best_results = find_best_phase_orientation(&records.1, &v, &family);
+            if has_missing_alleles(&parsed_record.1, args.depth) {
+                nocall_count += 1;
+                outfailvcf.write(&record);
+                continue;
+            }
+
+            let best_results = find_best_phase_orientation(&parsed_record.1, &v, &family);
             if !best_results.1.is_empty() {
                 let mut issues = best_results.1;
                 issues.sort();
@@ -420,8 +436,8 @@ fn main() {
                         .write(
                             format!(
                                 "{} {} {} {} {}-{}\n",
-                                records.0.chrom,
-                                records.0.start,
+                                parsed_record.0.chrom,
+                                parsed_record.0.start,
                                 s,
                                 issues.len(),
                                 v.bed.start,
@@ -438,47 +454,77 @@ fn main() {
                     }
                 }
 
-                let converted_genos = convert_genotype_map(&records.1);
+                let converted_genos = convert_genotype_map(&parsed_record.1);
                 let expected = best_results
                     .0
                     .as_ref()
                     .unwrap()
-                    .assign_genotypes(&converted_genos);
+                    .assign_genotypes(&converted_genos, true);
 
                 if issues.len() == 1 {
-                    print_genotype_maps(&converted_genos, &expected.1, &best_results.0.unwrap());
-                    println!(
-                        "FS {}:{}-{} {} {} {}\n",
+                    let geno_table = format_genotype_maps(
+                        &converted_genos,
+                        &expected.1,
+                        &best_results.0.unwrap(),
+                    );
+                    debug!(
+                        "Genotype filtering info:\n
+                        \n{}\n Position info -  {}:{}-{} {} {} {}\n",
+                        geno_table,
                         v.bed.chrom,
                         v.bed.start,
                         v.bed.end,
-                        records.0.start,
+                        parsed_record.0.start,
                         issues.len(),
                         issues.join(","),
                     );
                 }
-
+                outfailvcf.write(&record).unwrap();
                 failing_count += 1;
             } else {
+                let mut new_rec = record.clone();
+                let mut new_gts: Vec<GenotypeAllele> = Vec::new();
+                let convert_genos = convert_genotype_map(&parsed_record.1);
+                let mut br = best_results.0.unwrap().clone();
+                let loaded = br.assign_genotypes(&convert_genos, false);
+
+                for s in &samples {
+                    if loaded.1.contains_key(s) {
+                        let alleles = loaded.1.get(s).unwrap();
+
+                        new_gts.push(*alleles.get(0).unwrap());
+
+                        if let Some(second_allele) = alleles.get(1).unwrap().index() {
+                            new_gts.push(GenotypeAllele::Phased(second_allele as i32));
+                        } else {
+                            new_gts.push(*alleles.get(1).unwrap());
+                        }
+                    } else {
+                        new_gts.push(GenotypeAllele::UnphasedMissing);
+                        new_gts.push(GenotypeAllele::UnphasedMissing);
+                    }
+                }
+                new_rec.push_genotypes(&new_gts).unwrap();
+                outpassingvcf.write(&new_rec).unwrap();
+
                 passing_count += 1;
             }
         }
 
-        info!(
-            "region {}:{}-{} has {} variants",
-            v.bed.chrom,
-            v.bed.start,
-            v.bed.end,
-            genotypes.len()
-        );
-
         total_passing_count += passing_count;
         total_failing_count += failing_count;
         total_nocall_count += nocall_count;
+        total_low_qual_count += low_qual_count;
 
         info!(
-            "Passing {} Failing {} Nocall {}",
-            passing_count, failing_count, nocall_count
+            "Region {}:{}-{} - Passing: {} Failing: {} Nocall: {} Low-qual: {}",
+            v.bed.chrom,
+            v.bed.start,
+            v.bed.end,
+            passing_count,
+            failing_count,
+            nocall_count,
+            low_qual_count
         );
 
         let singletons = failed_singletons
@@ -509,7 +555,7 @@ fn main() {
             .unwrap();
     }
     info!(
-        "Total - passing: {} failing: {} nocall {}",
-        total_passing_count, total_failing_count, total_nocall_count
+        "Total - Passing: {} Failing: {} Nocall {} Low-qual {}",
+        total_passing_count, total_failing_count, total_nocall_count, total_low_qual_count
     );
 }
