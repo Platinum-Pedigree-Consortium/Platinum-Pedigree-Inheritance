@@ -8,6 +8,8 @@ use concordance::utils::*;
 use itertools::Itertools;
 use log::{debug, error, info, warn, LevelFilter};
 
+use core::hash;
+use std::clone;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -240,18 +242,6 @@ fn depth_filters(
     false
 }
 
-/// Identifies unique alleles for each founder and finds which children inherit them.
-///
-/// # Arguments
-/// - `genotype_data`: A `HashMap` mapping individual IDs to `(i32, Vec<GenotypeAllele>)`.
-/// - `family`: A reference to the `Family` struct.
-///
-/// # Returns
-/// - A tuple where:
-///   - `bool`: Indicates if a unique parent marker exists.
-///   - `HashMap<String, (HashSet<GenotypeAllele>, Vec<String>)>`:
-///     - Key: Founder ID.
-///     - Value: `(Unique alleles, List of children with those alleles)`.
 fn find_founder_unique_alleles(
     genotype_data: &HashMap<String, (i32, Vec<GenotypeAllele>)>,
     family: &Family,
@@ -263,53 +253,52 @@ fn find_founder_unique_alleles(
     let children = family.offspring(); // Retrieve children from Family
 
     let mut founder_alleles: HashMap<String, HashSet<GenotypeAllele>> = HashMap::new();
+    let mut marker_alleles: HashSet<GenotypeAllele> = HashSet::new();
+    let mut unique_founder_map: HashMap<String, (HashSet<GenotypeAllele>, Vec<String>)> =
+        HashMap::new();
 
     // Step 1: Collect alleles for each founder
     for founder in &founders {
         if let Some((_, alleles)) = genotype_data.get(&founder.id()) {
-            founder_alleles
-                .entry(founder.id())
-                .or_insert_with(HashSet::new)
-                .extend(alleles.iter().cloned());
-        }
-    }
+            // Markers must be heterozygous (skip homozygous markers)
+            if alleles.get(0).unwrap() == alleles.get(1).unwrap() {
+                continue;
+            }
 
-    // Step 2: Identify unique alleles for each founder
-    let mut unique_alleles_map: HashMap<String, HashSet<GenotypeAllele>> = founder_alleles.clone();
+            // Check for spouse's alleles
+            if let Some(spouse_id) = family.find_spouse(&founder.id()) {
+                if let Some((_, spouse_alleles)) = genotype_data.get(&spouse_id) {
+                    let spouse_allele_set: HashSet<_> = spouse_alleles.iter().cloned().collect();
+                    let founder_allele_set: HashSet<_> = alleles.iter().cloned().collect();
 
-    for (founder, alleles) in &mut unique_alleles_map {
-        // Remove alleles that are present in other founders
-        for (other_founder, other_alleles) in &founder_alleles {
-            if founder != other_founder {
-                alleles.retain(|allele| !other_alleles.contains(allele));
+                    // Identify non-spouse alleles
+                    let non_spouse_alleles: HashSet<GenotypeAllele> = founder_allele_set
+                        .difference(&spouse_allele_set)
+                        .cloned()
+                        .collect();
+
+                    if non_spouse_alleles.is_empty() {
+                        continue;
+                    }
+
+                    // Store the non-spouse alleles for this founder
+                    founder_alleles.insert(founder.id(), non_spouse_alleles.clone());
+                    marker_alleles.extend(&non_spouse_alleles);
+                }
             }
         }
     }
 
-    // Step 3: Filter out founders without unique alleles
-    unique_alleles_map.retain(|_, alleles| !alleles.is_empty());
-
-    // If there's not exactly one unique founder, return empty results
-    if unique_alleles_map.len() != 1 {
+    if founder_alleles.is_empty() {
         return (false, HashMap::new());
     }
 
-    let unique_founder_id = unique_alleles_map.keys().next().unwrap().clone();
+    println!("Markers: {:#?}\n\n", founder_alleles);
 
-    // A marker must be het in the founder, otherwise you don't know which haplotype it's on.
-    let (_depth, alleles) = genotype_data.get(&unique_founder_id).unwrap();
-    if alleles.get(0).unwrap() == alleles.get(1).unwrap() {
-        return (false, HashMap::new());
-    }
-
-    let unique_alleles = unique_alleles_map.get(&unique_founder_id).unwrap();
-
-    let mut children_with_unique_alleles = Vec::new();
-
-    // Step 4: Identify children inheriting unique alleles
+    // Step 2: Identify children inheriting unique alleles and load up the return data
     for child in &children {
         if let Some((_, child_alleles)) = genotype_data.get(&child.id()) {
-            let has_unique_allele = child_alleles.iter().any(|a| unique_alleles.contains(a));
+            let has_unique_allele = child_alleles.iter().any(|a| marker_alleles.contains(a));
 
             if has_unique_allele {
                 let father_id = child.get_father_id().unwrap_or_default();
@@ -317,30 +306,33 @@ fn find_founder_unique_alleles(
 
                 // Check if the unique allele is actually present in one of the parents
                 let father_has_allele = genotype_data.get(&father_id).map_or(false, |(_, fa)| {
-                    fa.iter().any(|a| unique_alleles.contains(a))
+                    fa.iter().any(|a| marker_alleles.contains(a))
                 });
 
                 let mother_has_allele = genotype_data.get(&mother_id).map_or(false, |(_, ma)| {
-                    ma.iter().any(|a| unique_alleles.contains(a))
+                    ma.iter().any(|a| marker_alleles.contains(a))
                 });
 
-                // If neither parent has the unique allele, return empty
+                // If neither parent has the unique allele, continue
                 if !father_has_allele && !mother_has_allele {
-                    return (false, HashMap::new());
+                    continue;
                 }
 
-                children_with_unique_alleles.push(child.id());
+                // Add this child to the corresponding founder in the return data
+                for (founder_id, unique_alleles) in &founder_alleles {
+                    if child_alleles.iter().any(|a| unique_alleles.contains(a)) {
+                        unique_founder_map
+                            .entry(founder_id.clone())
+                            .or_insert_with(|| (HashSet::new(), Vec::new()))
+                            .1
+                            .push(child.id());
+                    }
+                }
             }
         }
     }
-
-    (
-        !children_with_unique_alleles.is_empty(),
-        HashMap::from([(
-            unique_founder_id,
-            (unique_alleles.clone(), children_with_unique_alleles),
-        )]),
-    )
+    println!("{:?}", unique_founder_map);
+    (!unique_founder_map.is_empty(), unique_founder_map)
 }
 
 fn load_up(
