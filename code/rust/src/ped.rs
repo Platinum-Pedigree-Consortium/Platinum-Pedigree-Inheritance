@@ -285,4 +285,44 @@ impl Family {
 
         founders_with_children
     }
+
+    /// Finds the spouse of a given individual based on shared children.
+    ///
+    /// # Arguments
+    /// * `individual_id` - The ID of the individual whose spouse we want to find.
+    ///
+    /// # Returns
+    /// * `Option<String>` - The ID of the spouse, if found.
+    pub fn find_spouse(&self, individual_id: &str) -> Option<String> {
+        // Get the individual's children
+        let children: Vec<&Individual> = self
+            .offspring()
+            .iter()
+            .filter(|&&child| {
+                child.get_father_id().as_deref() == Some(individual_id)
+                    || child.get_mother_id().as_deref() == Some(individual_id)
+            })
+            .cloned()
+            .collect();
+
+        if children.is_empty() {
+            return None; // No children, so no spouse can be inferred
+        }
+
+        // Check parent IDs of the children to find the spouse
+        for child in children {
+            if let Some(father_id) = child.get_father_id() {
+                if father_id != individual_id {
+                    return Some(father_id); // Return the other parent as the spouse
+                }
+            }
+            if let Some(mother_id) = child.get_mother_id() {
+                if mother_id != individual_id {
+                    return Some(mother_id);
+                }
+            }
+        }
+
+        None // No spouse found
+    }
 }
