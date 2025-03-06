@@ -1,5 +1,4 @@
 use log::warn;
-use rust_htslib::bam::Reader;
 use rust_htslib::bcf::record::GenotypeAllele;
 use rust_htslib::bcf::IndexedReader;
 use rust_htslib::bcf::Read;

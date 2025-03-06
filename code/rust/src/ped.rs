@@ -8,13 +8,15 @@ use std::io::BufRead;
 use std::io::BufReader;
 use std::path::Path;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Individual {
+    #[allow(dead_code)]
     family_id: String,
     id: String,
     father_id: Option<String>,
     mother_id: Option<String>,
     sex: Option<u8>,
+    #[allow(dead_code)]
     phenotype: Option<u8>,
     children: Vec<String>,
 }
@@ -279,7 +281,7 @@ impl Family {
 
             // Only include founders who have more than one child
             if children.len() > 1 {
-                founders_with_children.push(founder.clone());
+                founders_with_children.push(founder);
             }
         }
 

@@ -7,7 +7,6 @@ use clap::Parser;
 use log::LevelFilter;
 use rust_htslib::bcf::{Format, Header, Read, Reader, Writer};
 use serde::{Deserialize, Serialize};
-use serde_json::to_string;
 
 /// Annotate overlapping variants
 #[derive(Parser, Debug)]

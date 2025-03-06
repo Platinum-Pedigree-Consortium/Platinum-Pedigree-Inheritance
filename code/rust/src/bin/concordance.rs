@@ -44,22 +44,6 @@ struct Args {
     qual: f32,
 }
 
-fn geno_conversion(geno: String) -> i32 {
-    match geno.as_str() {
-        "0/0" => 0,
-        "0|0" => 0,
-        "0/1" => 1,
-        "1/0" => 1,
-        "0|1" => 1,
-        "1|0" => 1,
-        "1/1" => 2,
-        "1|1" => 2,
-        "./." => 3,
-        ".|." => 3,
-        _ => 3,
-    }
-}
-
 fn allele_conversion(allele: char) -> usize {
     match allele {
         'A' => 0,

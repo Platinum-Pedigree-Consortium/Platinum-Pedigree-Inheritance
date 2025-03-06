@@ -1,15 +1,12 @@
 use clap::Parser;
 use log::info;
-use rust_htslib::bcf::record::Genotype;
+use log::LevelFilter;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::fs::read_to_string;
 use std::fs::File;
 use std::io::Write;
-use std::vec;
-
-use log::LevelFilter;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -191,7 +188,7 @@ fn parse_record(input: &str) -> MashRecord {
         .collect();
     sources.sort();
 
-    let mut results = MashRecord {
+    let results = MashRecord {
         chrom: pos_allele[0].clone(),
         start: pos_allele[1].clone(),
         end: pos_allele[2].clone(),
@@ -229,7 +226,7 @@ fn main() {
         File::create(format!("{}.fail.bed", args.prefix)).expect("Unable to create bed file");
     let mut pass_bed =
         File::create(format!("{}.pass.bed", args.prefix)).expect("Unable to create bed file");
-    let mut upset_r =
+    let _upset_r =
         File::create(format!("{}.upsetR.txt", args.prefix)).expect("Unable to create bed file");
 
     let mut header = "##fileformat=VCFv4.2\n".to_string();
@@ -250,7 +247,7 @@ fn main() {
     header.push_str("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t");
 
     let samples: Vec<String> = args.samples.split(",").map(str::to_string).collect();
-    let inputkeys: Vec<String> = args.ik.split(",").map(str::to_string).collect();
+    let _inputkeys: Vec<String> = args.ik.split(",").map(str::to_string).collect();
 
     header.push_str(&samples.join("\t"));
     header.push_str("\n");

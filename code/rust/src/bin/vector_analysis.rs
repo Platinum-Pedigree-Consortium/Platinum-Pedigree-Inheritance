@@ -1,8 +1,6 @@
 use clap::Parser;
 use csv::ReaderBuilder;
-use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
-use std::io::Read as IoRead;
+use std::collections::HashMap;
 
 /// quick script to calculate stats over the inheritance vectors
 #[derive(Parser, Debug)]
@@ -15,32 +13,25 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    let mut reader = ReaderBuilder::new().from_path(args.inheritance);
-
-    let header = reader
-        .as_mut()
-        .expect("Error reading inheritance CSV header")
-        .headers()
-        .expect("Error reading inheritance CSV header")
-        .clone();
+    let reader = ReaderBuilder::new().from_path(args.inheritance);
 
     let mut countsum: HashMap<i32, i128> = HashMap::new();
     let mut hapsums: HashMap<char, i128> = HashMap::new();
-    *hapsums.entry('A').or_insert(0);
-    *hapsums.entry('B').or_insert(0);
-    *hapsums.entry('C').or_insert(0);
-    *hapsums.entry('D').or_insert(0);
+    let _ = *hapsums.entry('A').or_insert(0);
+    let _ = *hapsums.entry('B').or_insert(0);
+    let _ = *hapsums.entry('C').or_insert(0);
+    let _ = *hapsums.entry('D').or_insert(0);
 
     let mut hap_obs: HashMap<char, Vec<i32>> = HashMap::new();
 
     for record in reader.expect("Error reading inheritance CSV.").records() {
         let mut counter: HashMap<char, i32> = HashMap::new();
-        *counter.entry('A').or_insert(0);
-        *counter.entry('B').or_insert(0);
-        *counter.entry('C').or_insert(0);
-        *counter.entry('D').or_insert(0);
+        let _ = *counter.entry('A').or_insert(0);
+        let _ = *counter.entry('B').or_insert(0);
+        let _ = *counter.entry('C').or_insert(0);
+        let _ = *counter.entry('D').or_insert(0);
 
-        let mut parts = record.as_ref().unwrap();
+        let parts = record.as_ref().unwrap();
 
         let start: i128 = parts.get(1).unwrap().parse().unwrap();
         let end: i128 = parts.get(2).unwrap().parse().unwrap();

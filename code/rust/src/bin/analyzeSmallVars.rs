@@ -1,8 +1,7 @@
 use clap::Parser;
-use rust_htslib::bcf::record::GenotypeAllele;
-use rust_htslib::bcf::{Header, Read, Reader};
-use std::collections::{HashMap, HashSet};
-use std::fs::read_to_string;
+
+use rust_htslib::bcf::{Read, Reader};
+use std::collections::HashSet;
 
 /// A tool to extract info for analyzing/plotting tool overlaps
 #[derive(Parser, Debug)]
@@ -19,13 +18,12 @@ struct Args {
 fn main() {
     let args = Args::parse();
     let mut bcf = Reader::from_path(args.vcf).expect("Error opening vcf file.");
-    let header = bcf.header().clone();
 
     let tools: Vec<String> = args.supports.split(",").map(str::to_string).collect();
 
     println!("{}", tools.join("\t"));
 
-    for (i, record_result) in bcf.records().enumerate() {
+    for (_i, record_result) in bcf.records().enumerate() {
         let mut sources: HashSet<String> = HashSet::new();
         let record = record_result.expect("Fail to read record");
         let b_sources = record.info(b"SOURCES").string().unwrap().unwrap();

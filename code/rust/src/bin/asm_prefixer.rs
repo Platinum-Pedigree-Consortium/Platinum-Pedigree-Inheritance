@@ -1,14 +1,8 @@
 use clap::Parser;
-use log::info;
-use std::collections::HashSet;
-use std::fmt;
-use std::fs::read_to_string;
+use log::LevelFilter;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
-use std::io::Write;
-
-use log::LevelFilter;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]

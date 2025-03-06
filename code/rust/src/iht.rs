@@ -613,7 +613,6 @@ pub fn parse_ihtv2_file(file_path: &str, founder_count: usize) -> Vec<IhtVec> {
     // Extract column indices for individuals
     let individual_start_idx = 3; // The first three columns are chrom, start, end
     let marker_count_idx = headers.len() - 2;
-    let length_idx = headers.len() - 1;
 
     // Read data lines
     for line in lines {
@@ -631,13 +630,10 @@ pub fn parse_ihtv2_file(file_path: &str, founder_count: usize) -> Vec<IhtVec> {
         let marker_count: usize = fields[marker_count_idx]
             .parse()
             .expect("Invalid marker count");
-        let length: usize = fields[length_idx].parse().expect("Invalid length");
 
         // Parse founders and children
         let mut founders = HashMap::new();
         let mut children = HashMap::new();
-
-        let child_names = &headers[individual_start_idx + founder_count..marker_count_idx];
 
         for (i, &alleles) in fields[individual_start_idx..marker_count_idx]
             .iter()
