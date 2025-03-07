@@ -240,26 +240,53 @@ fn depth_filters(
 fn unique_allele(
     individual1: &Vec<GenotypeAllele>,
     individual2: &Vec<GenotypeAllele>,
+    zygosity: &ChromType,
+    sex: u8,
 ) -> Option<GenotypeAllele> {
-    if individual1.get(0).unwrap() == individual1.get(1).unwrap() {
-        return None;
+    // if the chromosome is X and the individual 1 is female, she needs to be het (valid marker)
+    if (*zygosity == ChromType::ChrX && sex == 2) || (*zygosity != ChromType::ChrX) {
+        if individual1.get(0).unwrap() == individual1.get(1).unwrap() {
+            return None;
+        }
     }
 
     let set1: HashSet<GenotypeAllele> = individual1.iter().cloned().collect();
     let set2: HashSet<GenotypeAllele> = individual2.iter().cloned().collect();
 
     // Find the allele in individual1 that is not in individual2
-    set1.difference(&set2).next().cloned()
+    return set1.difference(&set2).next().cloned();
 }
 
 fn has_allele(a: &GenotypeAllele, geno: &Vec<GenotypeAllele>) -> bool {
     geno.iter().any(|b| b == a)
 }
 
+fn get_iht_markers(sample: &String, local_iht: &mut Iht) -> (char, char) {
+    if local_iht.children.contains_key(sample) {
+        return *local_iht.children.get(sample).unwrap();
+    }
+    if local_iht.founders.contains_key(sample) {
+        return *local_iht.founders.get(sample).unwrap();
+    }
+
+    ('?', '?')
+}
+
+fn find_valid_char(chars: (char, char)) -> Option<char> {
+    if chars.0 != '?' && chars.0 != '.' {
+        Some(chars.0)
+    } else if chars.1 != '?' && chars.1 != '.' {
+        Some(chars.1)
+    } else {
+        None
+    }
+}
+
 fn track_alleles_through_pedigree(
     genotype_data: &HashMap<String, (i32, Vec<GenotypeAllele>)>,
     family: &Family,
     local_iht: &mut Iht,
+    zygosity: &ChromType,
 ) -> (
     bool,
     HashMap<String, (HashSet<GenotypeAllele>, Vec<String>)>,
@@ -275,7 +302,12 @@ fn track_alleles_through_pedigree(
         if let Some(spouse_id) = family.find_spouse(&ind.id()) {
             let (_, spouse_alleles) = genotype_data.get(&spouse_id).unwrap();
             // the individual has a unique trackable marker
-            if let Some(marker) = unique_allele(ind_alleles, spouse_alleles) {
+            if let Some(marker) = unique_allele(
+                ind_alleles,
+                spouse_alleles,
+                zygosity,
+                ind.get_sex().unwrap(),
+            ) {
                 if let Some(iht_marker) = inherited_marker_allele.get(&ind_id.0) {
                     // if the unique allele isn't the marker we are tracking then we need to skip it.
                     if marker != *iht_marker {
@@ -283,28 +315,36 @@ fn track_alleles_through_pedigree(
                     }
                 }
 
+                let flabels = get_iht_markers(&ind_id.0, local_iht);
+
+                if flabels.0 == flabels.1 && flabels.0 == '?' {
+                    continue;
+                }
+                let flabel = find_valid_char(flabels).unwrap();
+
                 // looping over children
                 for c in family.get_children(&ind.id()) {
+                    let child_fam = family.get_individual(c).unwrap();
                     if has_allele(&marker, &genotype_data.get(c).unwrap().1) {
                         #[allow(unused_assignments)]
-                        let mut flabel = '?';
-                        if ind.no_parents() {
-                            flabel = local_iht.founders.get(&ind.id()).unwrap().0;
-                        } else {
-                            flabel = local_iht.children.get(&ind.id()).unwrap().0;
-
-                            if flabel == '?' {
-                                flabel = local_iht.children.get(&ind.id()).unwrap().1;
-                            }
-                        }
-
                         let child = local_iht.children.get_mut(c).unwrap();
-                        // male
+
+                        let parent_sex = ind.get_sex().unwrap();
+                        let child_sex = child_fam.get_sex().unwrap();
+
+                        // If the child is a male it cannot get X from dad, so we continue
+                        if child_sex == 1 && parent_sex == 1 && *zygosity == ChromType::ChrX {
+                            continue;
+                        }
+                        // This includes dad passing X to daughter
                         if ind.get_sex().unwrap() == 1 {
+                            // parent is male so we are passing to the first position
                             child.0 = flabel;
                         } else {
+                            // parent is female so we are passing to the first position
                             child.1 = flabel;
                         }
+
                         inherited_marker_allele.insert(c.clone(), marker);
                     }
                 }
@@ -312,8 +352,19 @@ fn track_alleles_through_pedigree(
         }
     }
 
+    // After processing markers, update children genotypes for ChrX:
+    // If the ChromType is ChrX and the child is male, set the first genotype entry to "."
+    if *zygosity == ChromType::ChrX {
+        for (child_id, genotype) in local_iht.children.iter_mut() {
+            let child = family.get_individual(child_id).unwrap();
+            if child.get_sex().unwrap() == 1 {
+                genotype.0 = '.';
+            }
+        }
+    }
+
     for c in &local_iht.children {
-        if c.1 .0 != '?' || c.1 .1 != '?' {
+        if (c.1 .0 != '?' && c.1 .0 != '.') || (c.1 .1 != '?' && c.1 .1 != '.') {
             return (true, HashMap::new());
         }
     }
@@ -731,10 +782,12 @@ fn count_mismatches(iht1: &Iht, iht2: &Iht) -> usize {
         .count()
 }
 
-fn backfill_sibs(fam: &Family, iht: &Iht) -> Iht {
+fn backfill_sibs(fam: &Family, iht: &Iht, zygosity: &ChromType) -> Iht {
     let mut updated_iht = iht.clone(); // Create a mutable clone
 
     for (founder_id, (founder_hap_a, founder_hap_b)) in &iht.founders {
+        let founder = fam.get_individual(&founder_id).unwrap();
+
         // Get all children of this founder
         let children = fam.get_children(founder_id);
 
@@ -751,6 +804,10 @@ fn backfill_sibs(fam: &Family, iht: &Iht) -> Iht {
                         identified_allele = Some((hap_b, 1));
                     }
                 }
+            }
+
+            if *zygosity == ChromType::ChrX && founder.get_sex().unwrap() == 1 {
+                continue;
             }
 
             // Step 2: If no child has a founder allele, skip backfilling
@@ -829,6 +886,9 @@ fn backfill_sibs(fam: &Family, iht: &Iht) -> Iht {
             }
         }
     }
+    println!("legend: {}", iht.legend());
+    println!("before: {}", iht.collapse_to_string());
+    println!("after:  {}\n", updated_iht.collapse_to_string());
 
     updated_iht // Return the modified Iht
 }
@@ -1063,16 +1123,16 @@ fn main() {
             let markers: (
                 bool,
                 HashMap<String, (HashSet<GenotypeAllele>, Vec<String>)>,
-            ) = track_alleles_through_pedigree(&gs.1, &family, &mut local_iht);
+            ) = track_alleles_through_pedigree(&gs.1, &family, &mut local_iht, &zygosity);
             if !markers.0 {
                 continue;
             }
 
             // backfilling the other founder allele in kinships (multi-child families)
-            let backfilled = backfill_sibs(&family, &local_iht);
+            let backfilled = backfill_sibs(&family, &local_iht, &zygosity);
 
             if all_sibs_have_same_haplotype(&family, &backfilled) {
-                warn!(
+                debug!(
                     "All sibs share same marker {} {} {}",
                     gs.0.chrom,
                     gs.0.start,
@@ -1128,7 +1188,7 @@ fn main() {
                     mask_print.push(key);
                 }
 
-                info!(
+                debug!(
                     "masking {} family member haplotype {} positions {}",
                     d.id(),
                     i,
