@@ -3,6 +3,7 @@ use concordance::bed::BedRecord;
 use concordance::iht::Iht;
 use concordance::iht::IhtVec;
 use concordance::utils::has_missing_alleles;
+use concordance::utils::unphase_genotype;
 
 use concordance::iht::parse_ihtv2_file;
 use concordance::ped::Family;
@@ -14,7 +15,6 @@ use log::warn;
 use log::LevelFilter;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
-use std::io;
 use std::io::Write;
 use std::path::Path;
 use std::process;
@@ -83,9 +83,14 @@ fn parse_vcf_record(
         if let Ok(genotypes) = record.genotypes() {
             for (i, sample) in samples.iter().enumerate() {
                 let geno: rust_htslib::bcf::record::Genotype = genotypes.get(i);
-                let mut alleles: Vec<GenotypeAllele> = geno.iter().cloned().collect();
-                alleles.sort_by_key(|a| a.index().unwrap_or(i32::MAX.try_into().unwrap()));
-                record_map.insert(sample.clone(), (*depths.get(sample).unwrap_or(&0), alleles));
+                let alleles: Vec<GenotypeAllele> = geno.iter().cloned().collect(); // Clone each allele
+                let mut unphased = unphase_genotype(&alleles);
+
+                unphased.sort_by_key(|a| a.index().unwrap_or(i32::MAX.try_into().unwrap()));
+                record_map.insert(
+                    sample.clone(),
+                    (*depths.get(sample).unwrap_or(&0), unphased),
+                );
             }
         }
     }
@@ -206,7 +211,6 @@ fn is_ignored_missing(allele: &GenotypeAllele) -> bool {
 fn find_best_phase_orientation(
     genotypes: &HashMap<String, (i32, Vec<GenotypeAllele>)>,
     iht_vec: &IhtVec,
-    fam: &Family,
 ) -> (Option<Iht>, Vec<String>) {
     let founder_phases = iht_vec.iht.founder_phase_orientations();
     let mut best_phase: Option<Iht> = None;
@@ -264,33 +268,6 @@ fn calculate_fraction(numerator: f64, denominator: f64) -> Option<f64> {
         None // Return None if division by zero
     } else {
         Some(numerator / denominator)
-    }
-}
-
-fn write_vcfs(
-    reader: &mut IndexedReader,
-    passing: &mut Writer,
-    failing: &mut Writer,
-    region: &BedRecord,
-) {
-    // Convert chromosome name to sequence index
-    let chrom_id = reader.header().name2rid(region.chrom.as_bytes()).unwrap();
-    // Convert start and end positions safely
-    let start: u64 = region.start.try_into().unwrap_or(0); // Ensure start is valid
-    let end: Option<u64> = if region.end >= 0 {
-        Some(region.end.try_into().unwrap_or(u64::MAX)) // Ensure end is valid
-    } else {
-        None // No end limit
-    };
-
-    // Fetch the records using the sequence index and converted start/end
-    let rv = reader.fetch(chrom_id, start, end).unwrap();
-
-    for result in reader.records() {
-        let record = match result {
-            Ok(rec) => rec,
-            Err(_) => continue, // Skip invalid records
-        };
     }
 }
 
@@ -408,7 +385,7 @@ fn main() {
         let chrom_id = reader.header().name2rid(v.bed.chrom.as_bytes()).unwrap();
 
         // Fetch the records using the sequence index and converted start/end
-        let rv = reader.fetch(chrom_id, start, end);
+        let _rv = reader.fetch(chrom_id, start, end);
 
         for r in reader.records() {
             let record = r.unwrap();
@@ -416,17 +393,17 @@ fn main() {
 
             if record.qual() < args.qual {
                 low_qual_count += 1;
-                outfailvcf.write(&record);
+                outfailvcf.write(&record).unwrap();
                 continue;
             }
 
             if has_missing_alleles(&parsed_record.1, args.depth) {
                 nocall_count += 1;
-                outfailvcf.write(&record);
+                outfailvcf.write(&record).unwrap();
                 continue;
             }
 
-            let best_results = find_best_phase_orientation(&parsed_record.1, &v, &family);
+            let best_results = find_best_phase_orientation(&parsed_record.1, &v);
             if !best_results.1.is_empty() {
                 let mut issues = best_results.1;
                 issues.sort();
@@ -485,7 +462,7 @@ fn main() {
                 let mut new_rec = record.clone();
                 let mut new_gts: Vec<GenotypeAllele> = Vec::new();
                 let convert_genos = convert_genotype_map(&parsed_record.1);
-                let mut br = best_results.0.unwrap().clone();
+                let br = best_results.0.unwrap().clone();
                 let loaded = br.assign_genotypes(&convert_genos, false);
 
                 for s in &samples {

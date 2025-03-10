@@ -8,13 +8,15 @@ use std::io::BufRead;
 use std::io::BufReader;
 use std::path::Path;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Individual {
+    #[allow(dead_code)]
     family_id: String,
     id: String,
     father_id: Option<String>,
     mother_id: Option<String>,
     sex: Option<u8>,
+    #[allow(dead_code)]
     phenotype: Option<u8>,
     children: Vec<String>,
 }
@@ -119,14 +121,6 @@ impl Family {
     ///
     /// # Returns
     /// - A `Vec<&Individual>` containing offspring sorted by increasing depth.
-    ///
-    /// # Example
-    /// ```rust
-    /// let offspring = family.offspring();
-    /// for ind in offspring {
-    ///     println!("ID: {}, Depth: {:?}", ind.id, family.get_individual_depths().iter().find(|(id, _)| id == &ind.id).unwrap().1);
-    /// }
-    /// ```
     pub fn offspring(&self) -> Vec<&Individual> {
         let depths = self.get_individual_depths(); // Get individuals sorted by depth
 
@@ -279,10 +273,50 @@ impl Family {
 
             // Only include founders who have more than one child
             if children.len() > 1 {
-                founders_with_children.push(founder.clone());
+                founders_with_children.push(founder);
             }
         }
 
         founders_with_children
+    }
+
+    /// Finds the spouse of a given individual based on shared children.
+    ///
+    /// # Arguments
+    /// * `individual_id` - The ID of the individual whose spouse we want to find.
+    ///
+    /// # Returns
+    /// * `Option<String>` - The ID of the spouse, if found.
+    pub fn find_spouse(&self, individual_id: &str) -> Option<String> {
+        // Get the individual's children
+        let children: Vec<&Individual> = self
+            .offspring()
+            .iter()
+            .filter(|&&child| {
+                child.get_father_id().as_deref() == Some(individual_id)
+                    || child.get_mother_id().as_deref() == Some(individual_id)
+            })
+            .cloned()
+            .collect();
+
+        if children.is_empty() {
+            return None; // No children, so no spouse can be inferred
+        }
+
+        // Check parent IDs of the children to find the spouse
+        for child in children {
+            if let Some(father_id) = child.get_father_id() {
+                if father_id != individual_id {
+                    return Some(father_id); // Return the other parent as the spouse
+                }
+            }
+            if let Some(mother_id) = child.get_mother_id() {
+                if mother_id != individual_id {
+                    return Some(mother_id);
+                }
+            }
+        }
+
+        None // No spouse found
     }
 }

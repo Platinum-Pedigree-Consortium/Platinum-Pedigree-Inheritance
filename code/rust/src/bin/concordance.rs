@@ -44,22 +44,6 @@ struct Args {
     qual: f32,
 }
 
-fn geno_conversion(geno: String) -> i32 {
-    match geno.as_str() {
-        "0/0" => 0,
-        "0|0" => 0,
-        "0/1" => 1,
-        "1/0" => 1,
-        "0|1" => 1,
-        "1|0" => 1,
-        "1/1" => 2,
-        "1|1" => 2,
-        "./." => 3,
-        ".|." => 3,
-        _ => 3,
-    }
-}
-
 fn allele_conversion(allele: char) -> usize {
     match allele {
         'A' => 0,
@@ -406,47 +390,4 @@ fn main() {
         "not in block: {} passed: {} failed: {} all-het: {} all-ref: {} non-concordant: {} nocall-geno: {} lq: {} concordance-rate: {:.3} ",
         block_fail, passed, failed, all_het, all_ref, no_con, nocall_geno, lowq, con_rate
     );
-}
-
-#[cfg(test)]
-mod tests {
-    // Note this useful idiom: importing names from outer (for mod tests) scope.
-    use super::*;
-
-    #[test]
-    fn test_geno_hom() {
-        assert_eq!(geno_conversion("0/0".to_string()), 0);
-    }
-    #[test]
-    fn test_geno_hom_phase() {
-        assert_eq!(geno_conversion("0|0".to_string()), 0);
-    }
-    #[test]
-    fn test_geno_het1() {
-        assert_eq!(geno_conversion("0/1".to_string()), 1);
-    }
-    #[test]
-    fn test_geno_het2() {
-        assert_eq!(geno_conversion("1/0".to_string()), 1);
-    }
-    #[test]
-    fn test_geno_het3() {
-        assert_eq!(geno_conversion("1|0".to_string()), 1);
-    }
-    #[test]
-    fn test_geno_het4() {
-        assert_eq!(geno_conversion("0|1".to_string()), 1);
-    }
-    #[test]
-    fn test_geno_nc1() {
-        assert_eq!(geno_conversion("./1".to_string()), 3);
-    }
-    #[test]
-    fn test_geno_nc2() {
-        assert_eq!(geno_conversion("./.".to_string()), 3);
-    }
-    #[test]
-    fn test_geno_nc3() {
-        assert_eq!(geno_conversion("./0".to_string()), 3);
-    }
 }

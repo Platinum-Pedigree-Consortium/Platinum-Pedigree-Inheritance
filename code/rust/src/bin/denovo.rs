@@ -1,7 +1,7 @@
 use clap::Parser;
 use core::f32;
 use rust_htslib::bcf::record::GenotypeAllele;
-use rust_htslib::bcf::{Header, Read, Reader};
+use rust_htslib::bcf::{Read, Reader};
 use std::collections::HashMap;
 use std::fs::read_to_string;
 
@@ -41,6 +41,7 @@ struct Args {
 #[derive(Debug, Clone)]
 enum Sex {
     Male,
+    #[allow(dead_code)]
     Female,
     Unknown,
 }
@@ -69,12 +70,15 @@ impl Default for Iht {
 }
 
 #[derive(Debug, Clone)]
+
 struct Member {
+    #[allow(dead_code)]
     family: String,
     id: String,
     father: String,
     mother: String,
     pub children: Vec<String>,
+    #[allow(dead_code)]
     sex: Sex,
     genotype: (GenotypeAllele, GenotypeAllele),
     geno: Geno,
@@ -274,7 +278,7 @@ struct SiteInfo {
     unknown: i32,
     total_count: i32,
     violations: i32,
-    Valid: i32,
+    valid: i32,
     avg_gq: f32,
     min_ref_fraction: f32,
 }
@@ -289,7 +293,7 @@ fn get_first_denovo(trans: &HashMap<String, Iht>) -> String {
     result
 }
 
-fn process_site(family: &HashMap<String, Member>, gq: i32, founders: &Vec<String>) -> SiteInfo {
+fn process_site(family: &HashMap<String, Member>, founders: &Vec<String>) -> SiteInfo {
     let mut trans: HashMap<String, Iht> = HashMap::new();
     for k in founders {
         follow_family_transmission(family, k, &mut trans);
@@ -322,7 +326,7 @@ fn process_site(family: &HashMap<String, Member>, gq: i32, founders: &Vec<String
         unknown: *counts.get("UNKNOWN").unwrap(),
         total_count: trans.len() as i32,
         violations: *counts.get("VIOLATION").unwrap(),
-        Valid: *counts.get("Valid").unwrap(),
+        valid: *counts.get("Valid").unwrap(),
         avg_gq: avg_gq(family),
         min_ref_fraction: min_ref_fraction,
     }
@@ -421,7 +425,7 @@ fn main() {
             allele_string.push(',');
         }
 
-        let site_res = process_site(&local_family, args.gq, &founders);
+        let site_res = process_site(&local_family, &founders);
         if site_res.denovo
             && site_res.unknown < args.unknown
             && args.min_parental_ref_frac < site_res.min_ref_fraction
@@ -434,7 +438,7 @@ fn main() {
                 record.allele_count(),
                 site_res.denovo_sample,
                 site_res.classification,
-                site_res.Valid,
+                site_res.valid,
                 site_res.violations,
                 site_res.unknown,
                 site_res.total_count,

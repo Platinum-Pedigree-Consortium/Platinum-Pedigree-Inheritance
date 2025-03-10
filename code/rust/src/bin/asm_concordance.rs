@@ -50,19 +50,19 @@ struct Assembly {
 }
 
 #[derive(Clone)]
-struct record_bucket {
+struct RecordBucket {
     rec: Record,
     cig: CigarStringView,
     seq: Vec<u8>,
 }
 
-impl PartialEq for record_bucket {
+impl PartialEq for RecordBucket {
     fn eq(&self, other: &Self) -> bool {
         self.rec == other.rec
     }
 }
 
-impl Eq for record_bucket {}
+impl Eq for RecordBucket {}
 
 #[derive(Deserialize, Debug)]
 
@@ -89,6 +89,7 @@ impl std::fmt::Display for Region {
 }
 
 impl Region {
+    #![allow(dead_code)]
     fn parse_region(region_str: &String) -> Result<Region> {
         // Parse the region
         let region_parts: Vec<&str> = region_str.split(':').collect();
@@ -192,9 +193,12 @@ fn target_to_query(cigar: &CigarStringView, t_pos: i64, t_start: i64, t_end: i64
 
 // Struct for holding extracted fasta entries
 #[derive(Debug, Clone)]
+
 struct FastaEntry {
     strand: bool,
+    #[allow(dead_code)]
     length: usize,
+    #[allow(dead_code)]
     name: String,
     seq: String,
 }
@@ -206,9 +210,8 @@ fn my_cmp(x: &FastaEntry, y: &FastaEntry) -> Ordering {
 
 // Function to extract sequences from BAM, trim to target region, and optionally reverse complement
 fn data_to_fasta(
-    data: &mut Lapper<usize, record_bucket>,
+    data: &mut Lapper<usize, RecordBucket>,
     region: &Region,
-    flag: u16,
     flip_rc: bool,
 ) -> Result<Vec<FastaEntry>> {
     let mut fasta_entries: Vec<FastaEntry> = Vec::new();
@@ -306,7 +309,7 @@ fn test_concordance(
         let mut passing = 0;
         let mut total_count = 0;
 
-        for (si, sample) in iht.samples.iter().enumerate() {
+        for (si, _sample) in iht.samples.iter().enumerate() {
             let a = iht.parental_hap.get(si).unwrap().chars().nth(0).unwrap();
             let b = iht.parental_hap.get(si).unwrap().chars().nth(1).unwrap();
 
@@ -370,9 +373,8 @@ fn open_bam_files(fns: &HashMap<String, Assembly>) -> Result<HashMap<String, [In
 }
 
 fn fetch_haplotypes(
-    data: &mut HashMap<String, [Lapper<usize, record_bucket>; 2]>,
+    data: &mut HashMap<String, [Lapper<usize, RecordBucket>; 2]>,
     region: &Region,
-    flag: u16,
     flip_rc: bool,
     problem_counts: &mut (i32, i32),
     sample_info: &HashMap<String, Assembly>,
@@ -382,8 +384,8 @@ fn fetch_haplotypes(
     for sample in data {
         let sex = sample_info.get(sample.0).unwrap().sex.clone();
 
-        let mut h1 = data_to_fasta(sample.1.get_mut(0).unwrap(), &region, flag, flip_rc).unwrap();
-        let mut h2 = data_to_fasta(sample.1.get_mut(1).unwrap(), &region, flag, flip_rc).unwrap();
+        let mut h1 = data_to_fasta(sample.1.get_mut(0).unwrap(), &region, flip_rc).unwrap();
+        let mut h2 = data_to_fasta(sample.1.get_mut(1).unwrap(), &region, flip_rc).unwrap();
 
         if sex == "male"
             && (region.seqid == "X" || region.seqid == "chrX" || region.seqid == "ChrX")
@@ -436,11 +438,11 @@ fn fetch_haplotypes(
 fn load_chromosome(
     samples: &mut HashMap<String, [IndexedReader; 2]>,
     chr: &String,
-    data: &mut HashMap<String, [Lapper<usize, record_bucket>; 2]>,
+    data: &mut HashMap<String, [Lapper<usize, RecordBucket>; 2]>,
 ) {
     data.clear();
 
-    type Iv = Interval<usize, record_bucket>;
+    type Iv = Interval<usize, RecordBucket>;
     let mut storage: HashMap<String, [Vec<Iv>; 2]> = HashMap::new();
 
     // Initialize the storage HashMap with empty Vecs for each sample
@@ -474,7 +476,7 @@ fn load_chromosome(
                 let seq = rec.seq().as_bytes();
                 let cig = rec.cigar();
 
-                let val = record_bucket { rec, seq, cig };
+                let val = RecordBucket { rec, seq, cig };
                 let s = storage.get_mut(&sample.0.clone()).unwrap();
 
                 let start = val.rec.reference_start() as usize;
@@ -523,7 +525,7 @@ fn main() {
 
     let mut last_chrom = "".to_string();
 
-    let mut read_data: HashMap<String, [Lapper<usize, record_bucket>; 2]> = HashMap::new();
+    let mut read_data: HashMap<String, [Lapper<usize, RecordBucket>; 2]> = HashMap::new();
 
     for region in bed_records {
         let lr: Region = region.into();
@@ -533,14 +535,7 @@ fn main() {
         }
 
         let mut problems = (0, 0);
-        let loaded_haps = fetch_haplotypes(
-            &mut read_data,
-            &lr,
-            260 as u16,
-            false,
-            &mut problems,
-            &sample_info,
-        );
+        let loaded_haps = fetch_haplotypes(&mut read_data, &lr, false, &mut problems, &sample_info);
 
         let mut current_block_idx: usize = 0;
         let block = iht::get_iht_block(

@@ -279,7 +279,7 @@ fn load_data(
                 entry.ovl = OvlType::OvlPrev;
             }
 
-            while true {
+            loop {
                 if last_var.end < entry.start {
                     last_var.next_vars.push(current_idx);
                 }
