@@ -250,6 +250,13 @@ fn unique_allele(
         }
     }
 
+    // if the chromosome is X and the individual is 1 male, he needs to be hom (deepVariant)
+    if *zygosity == ChromType::ChrX && sex == 1 {
+        if individual1.get(0).unwrap() != individual1.get(1).unwrap() {
+            return None;
+        }
+    }
+
     let set1: HashSet<GenotypeAllele> = individual1.iter().cloned().collect();
     let set2: HashSet<GenotypeAllele> = individual2.iter().cloned().collect();
 
@@ -393,7 +400,7 @@ fn collapse_identical_iht(data: Vec<IhtVec>) -> Vec<IhtVec> {
                     &next.iht.children,
                 )
             {
-                debug!("merging ith blocks");
+                debug!("merging iht blocks");
                 end = next.bed.end;
                 count += next.count;
                 merge_family_maps(&mut merged_founders, &next.iht.founders);
@@ -689,7 +696,16 @@ fn summarize_child_changes(iht_vecs: &Vec<IhtVec>) -> Vec<String> {
     summaries
 }
 
-fn perform_flips_in_place(iht_vecs: &mut Vec<IhtVec>, founders: Vec<&Individual>, family: &Family) {
+fn perform_flips_in_place(
+    iht_vecs: &mut Vec<IhtVec>,
+    founders: Vec<&Individual>,
+    family: &Family,
+    zygosity: &ChromType,
+) {
+    if *zygosity == ChromType::ChrX {
+        return;
+    }
+
     let flippable_indices: Vec<usize> = iht_vecs
         .iter()
         .enumerate()
@@ -788,6 +804,10 @@ fn backfill_sibs(fam: &Family, iht: &Iht, zygosity: &ChromType) -> Iht {
     for (founder_id, (founder_hap_a, founder_hap_b)) in &iht.founders {
         let founder = fam.get_individual(&founder_id).unwrap();
 
+        if *zygosity == ChromType::ChrX && founder.get_sex().unwrap() == 1 {
+            continue;
+        }
+
         // Get all children of this founder
         let children = fam.get_children(founder_id);
 
@@ -804,10 +824,6 @@ fn backfill_sibs(fam: &Family, iht: &Iht, zygosity: &ChromType) -> Iht {
                         identified_allele = Some((hap_b, 1));
                     }
                 }
-            }
-
-            if *zygosity == ChromType::ChrX && founder.get_sex().unwrap() == 1 {
-                continue;
             }
 
             // Step 2: If no child has a founder allele, skip backfilling
@@ -886,41 +902,12 @@ fn backfill_sibs(fam: &Family, iht: &Iht, zygosity: &ChromType) -> Iht {
             }
         }
     }
-    println!("legend: {}", iht.legend());
-    println!("before: {}", iht.collapse_to_string());
-    println!("after:  {}\n", updated_iht.collapse_to_string());
-
+    /*
+            println!("legend: {}", iht.legend());
+            println!("before: {}", iht.collapse_to_string());
+            println!("after:  {}\n", updated_iht.collapse_to_string());
+    */
     updated_iht // Return the modified Iht
-}
-
-fn all_sibs_have_same_haplotype(fam: &Family, iht: &Iht) -> bool {
-    for (founder_id, (founder_hap_a, founder_hap_b)) in &iht.founders {
-        let children = fam.get_children(founder_id);
-
-        // Process only if the founder has multiple children
-        if children.len() > 1 {
-            let mut allele_counts = std::collections::HashMap::new();
-
-            // Step 1: Count occurrences of **only the founder alleles** in children
-            for child_id in &children {
-                if let Some(&(hap_a, hap_b)) = iht.children.get(*child_id) {
-                    if hap_a == *founder_hap_a || hap_a == *founder_hap_b {
-                        *allele_counts.entry(hap_a).or_insert(0) += 1;
-                    }
-                    if hap_b == *founder_hap_a || hap_b == *founder_hap_b {
-                        *allele_counts.entry(hap_b).or_insert(0) += 1;
-                    }
-                }
-            }
-
-            // Step 2: Check if **any** founder allele appears in all children
-            if allele_counts.values().any(|&count| count == children.len()) {
-                return true;
-            }
-        }
-    }
-
-    false
 }
 
 fn collect_alleles_with_positions(
@@ -1131,14 +1118,16 @@ fn main() {
             // backfilling the other founder allele in kinships (multi-child families)
             let backfilled = backfill_sibs(&family, &local_iht, &zygosity);
 
-            if all_sibs_have_same_haplotype(&family, &backfilled) {
+            /*             if all_sibs_have_same_haplotype(&family, &backfilled) {
                 debug!(
                     "All sibs share same marker {} {} {}",
                     gs.0.chrom,
                     gs.0.start,
                     backfilled.collapse_to_string()
                 );
+                continue;
             }
+            */
 
             marker_info.insert(gs.0.start, marker_to_string(&markers.1));
 
@@ -1155,6 +1144,7 @@ fn main() {
             &mut pre_vector,
             family.get_founders_with_multiple_children(),
             &family,
+            &zygosity,
         );
 
         for m in &pre_vector {
@@ -1174,7 +1164,7 @@ fn main() {
 
         let stable_iht = pre_vector.clone();
 
-        info!("finding marker runs.");
+        info!("Finding short marker runs to mask.");
         for d in family.offspring() {
             for i in [0 as usize, 1 as usize].iter() {
                 let alleles = collect_alleles_with_positions(&pre_vector, &d.id(), *i);
@@ -1204,6 +1194,7 @@ fn main() {
             &mut iht_vecs,
             family.get_founders_with_multiple_children(),
             &family,
+            &zygosity,
         );
 
         fill_missing_values(&mut iht_vecs, stable_iht);
@@ -1213,6 +1204,7 @@ fn main() {
             &mut iht_vecs,
             family.get_founders_with_multiple_children(),
             &family,
+            &zygosity,
         );
 
         for i in &iht_vecs {

@@ -453,12 +453,6 @@ impl Iht {
         // Step 1: Build `founder_allele_map` from founder genotypes
         for (founder, (allele1, allele2)) in &self.founders {
             if let Some(founder_alleles) = founder_genotypes.get(founder) {
-                /*
-                println!(
-                    "fu {:?} {:?} a1:{} a2:{}",
-                    founder, founder_alleles, allele1, allele2
-                );
-                */
                 if founder_alleles.len() >= 2 {
                     founder_allele_map.insert(*allele1, founder_alleles[0]);
                     founder_allele_map.insert(*allele2, founder_alleles[1]);
@@ -466,11 +460,9 @@ impl Iht {
             }
         }
 
-        //println!(" {:?}", founder_allele_map);
-
         // Step 2: Assign genotypes based on `founder_allele_map`
         for (individual, (hap1, hap2)) in self.founders.iter().chain(self.children.iter()) {
-            let allele1 = founder_allele_map
+            let mut allele1 = founder_allele_map
                 .get(hap1)
                 .copied()
                 .unwrap_or(GenotypeAllele::UnphasedMissing);
@@ -478,6 +470,10 @@ impl Iht {
                 .get(hap2)
                 .copied()
                 .unwrap_or(GenotypeAllele::UnphasedMissing);
+
+            if *hap1 == '.' {
+                allele1 = allele2;
+            }
 
             // Ensure consistent ordering
             let sorted_genotypes = if allele1.index() > allele2.index() && sort_alleles {
@@ -491,6 +487,7 @@ impl Iht {
 
         (founder_allele_map, updated_genotypes)
     }
+
     /// Generate all possible founder allele orientations
     pub fn founder_phase_orientations(&self) -> Vec<Iht> {
         let mut results = Vec::new();
@@ -507,7 +504,7 @@ impl Iht {
                     .enumerate()
                     .map(|(j, id)| {
                         let (allele_a, allele_b) = self.founders[id];
-                        if (i >> j) & 1 == 1 {
+                        if (i >> j) & 1 == 1 && allele_a != '.' && allele_b != '.' {
                             (id.clone(), (allele_b, allele_a)) // Swap alleles
                         } else {
                             (id.clone(), (allele_a, allele_b)) // Keep original
@@ -531,10 +528,10 @@ impl Iht {
         let mut non_missing: HashSet<char> = HashSet::new();
 
         for (_, (hap_a, hap_b)) in &self.children {
-            if *hap_a != '?' {
+            if *hap_a != '?' && *hap_a != '.' {
                 non_missing.insert(*hap_a);
             }
-            if *hap_b != '?' {
+            if *hap_b != '?' && *hap_a != '.' {
                 non_missing.insert(*hap_b);
             }
         }
