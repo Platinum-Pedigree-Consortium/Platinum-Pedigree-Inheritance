@@ -120,27 +120,21 @@ pub fn extract_depth_statistics(
     Ok(sample_stats)
 }
 
-/// Unphases a genotype by sorting alleles and converting missing phased alleles to unphased.
-///
-/// # Arguments
-/// * `alleles` - A reference to a vector of `GenotypeAllele` representing the genotype.
-///
-/// # Returns
-/// A new vector of `GenotypeAllele`, sorted to ensure the smallest allele is first,
-/// and replacing `PhasedMissing` with `UnphasedMissing`.
 pub fn unphase_genotype(alleles: &[GenotypeAllele]) -> Vec<GenotypeAllele> {
     let mut sorted_alleles: Vec<GenotypeAllele> = alleles
         .iter()
         .map(|a| match a {
-            GenotypeAllele::PhasedMissing => GenotypeAllele::UnphasedMissing, // Convert missing phased to unphased
-            _ => *a, // Keep everything else as is
+            GenotypeAllele::PhasedMissing => GenotypeAllele::UnphasedMissing, // Convert phased missing to unphased missing
+            GenotypeAllele::Phased(x) => GenotypeAllele::Unphased(*x), // Convert phased alleles to unphased
+            _ => *a,                                                   // Keep everything else as is
         })
         .collect();
 
     // Sort by allele index, ensuring missing values come first
     sorted_alleles.sort_by_key(|a| match a {
         GenotypeAllele::UnphasedMissing => u32::MIN, // Ensure missing calls come first
-        _ => a.index().unwrap_or(u32::MAX),          // Sort by allele index otherwise
+        GenotypeAllele::Unphased(x) => *x as u32,    // Sort alleles numerically
+        _ => u32::MAX,                               // Shouldn't happen, but keeps safety
     });
 
     sorted_alleles
@@ -176,7 +170,7 @@ mod tests {
         let result = unphase_genotype(&alleles);
         assert_eq!(
             result,
-            vec![GenotypeAllele::Phased(0), GenotypeAllele::Phased(1)]
+            vec![GenotypeAllele::Unphased(0), GenotypeAllele::Unphased(1)]
         );
     }
 
@@ -186,7 +180,7 @@ mod tests {
         let result = unphase_genotype(&alleles);
         assert_eq!(
             result,
-            vec![GenotypeAllele::Phased(2), GenotypeAllele::Phased(2)]
+            vec![GenotypeAllele::Unphased(2), GenotypeAllele::Unphased(2)]
         );
     }
 
@@ -206,7 +200,7 @@ mod tests {
         let result = unphase_genotype(&alleles);
         assert_eq!(
             result,
-            vec![GenotypeAllele::UnphasedMissing, GenotypeAllele::Phased(1)]
+            vec![GenotypeAllele::UnphasedMissing, GenotypeAllele::Unphased(1)]
         );
     }
 
@@ -286,8 +280,8 @@ mod tests {
             result,
             vec![
                 GenotypeAllele::UnphasedMissing,
-                GenotypeAllele::Phased(1),
-                GenotypeAllele::Phased(2)
+                GenotypeAllele::Unphased(1),
+                GenotypeAllele::Unphased(2)
             ]
         );
     }

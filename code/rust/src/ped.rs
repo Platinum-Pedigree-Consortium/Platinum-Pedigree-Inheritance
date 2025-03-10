@@ -121,14 +121,6 @@ impl Family {
     ///
     /// # Returns
     /// - A `Vec<&Individual>` containing offspring sorted by increasing depth.
-    ///
-    /// # Example
-    /// ```rust
-    /// let offspring = family.offspring();
-    /// for ind in offspring {
-    ///     println!("ID: {}, Depth: {:?}", ind.id, family.get_individual_depths().iter().find(|(id, _)| id == &ind.id).unwrap().1);
-    /// }
-    /// ```
     pub fn offspring(&self) -> Vec<&Individual> {
         let depths = self.get_individual_depths(); // Get individuals sorted by depth
 

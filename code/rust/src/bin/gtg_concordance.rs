@@ -3,6 +3,7 @@ use concordance::bed::BedRecord;
 use concordance::iht::Iht;
 use concordance::iht::IhtVec;
 use concordance::utils::has_missing_alleles;
+use concordance::utils::unphase_genotype;
 
 use concordance::iht::parse_ihtv2_file;
 use concordance::ped::Family;
@@ -82,9 +83,14 @@ fn parse_vcf_record(
         if let Ok(genotypes) = record.genotypes() {
             for (i, sample) in samples.iter().enumerate() {
                 let geno: rust_htslib::bcf::record::Genotype = genotypes.get(i);
-                let mut alleles: Vec<GenotypeAllele> = geno.iter().cloned().collect();
-                alleles.sort_by_key(|a| a.index().unwrap_or(i32::MAX.try_into().unwrap()));
-                record_map.insert(sample.clone(), (*depths.get(sample).unwrap_or(&0), alleles));
+                let alleles: Vec<GenotypeAllele> = geno.iter().cloned().collect(); // Clone each allele
+                let mut unphased = unphase_genotype(&alleles);
+
+                unphased.sort_by_key(|a| a.index().unwrap_or(i32::MAX.try_into().unwrap()));
+                record_map.insert(
+                    sample.clone(),
+                    (*depths.get(sample).unwrap_or(&0), unphased),
+                );
             }
         }
     }

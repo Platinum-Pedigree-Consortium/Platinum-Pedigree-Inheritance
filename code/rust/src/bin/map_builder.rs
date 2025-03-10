@@ -175,7 +175,10 @@ fn parse_vcf(
         for (i, sample) in samples.iter().enumerate() {
             let geno: rust_htslib::bcf::record::Genotype = genotypes.get(i);
             let alleles: Vec<GenotypeAllele> = geno.iter().cloned().collect(); // Clone each allele
-            record_map.insert(sample.clone(), (*depths.get(sample).unwrap(), alleles));
+            let unphased = unphase_genotype(&alleles);
+
+            //println!("before: {:?} after {:?}", alleles, unphased);
+            record_map.insert(sample.clone(), (*depths.get(sample).unwrap(), unphased));
         }
         records_genotype_map.push((
             BedRecord {
