@@ -119,3 +119,176 @@ pub fn extract_depth_statistics(
 
     Ok(sample_stats)
 }
+
+/// Unphases a genotype by sorting alleles and converting missing phased alleles to unphased.
+///
+/// # Arguments
+/// * `alleles` - A reference to a vector of `GenotypeAllele` representing the genotype.
+///
+/// # Returns
+/// A new vector of `GenotypeAllele`, sorted to ensure the smallest allele is first,
+/// and replacing `PhasedMissing` with `UnphasedMissing`.
+pub fn unphase_genotype(alleles: &[GenotypeAllele]) -> Vec<GenotypeAllele> {
+    let mut sorted_alleles: Vec<GenotypeAllele> = alleles
+        .iter()
+        .map(|a| match a {
+            GenotypeAllele::PhasedMissing => GenotypeAllele::UnphasedMissing, // Convert missing phased to unphased
+            _ => *a, // Keep everything else as is
+        })
+        .collect();
+
+    // Sort by allele index, ensuring missing values come first
+    sorted_alleles.sort_by_key(|a| match a {
+        GenotypeAllele::UnphasedMissing => u32::MIN, // Ensure missing calls come first
+        _ => a.index().unwrap_or(u32::MAX),          // Sort by allele index otherwise
+    });
+
+    sorted_alleles
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_htslib::bcf::record::GenotypeAllele;
+
+    #[test]
+    fn test_unphase_homozygous() {
+        let alleles = vec![GenotypeAllele::Unphased(1), GenotypeAllele::Unphased(1)];
+        let result = unphase_genotype(&alleles);
+        assert_eq!(
+            result,
+            vec![GenotypeAllele::Unphased(1), GenotypeAllele::Unphased(1)]
+        );
+    }
+
+    #[test]
+    fn test_unphase_heterozygous() {
+        let alleles = vec![GenotypeAllele::Unphased(1), GenotypeAllele::Unphased(0)];
+        let result = unphase_genotype(&alleles);
+        assert_eq!(
+            result,
+            vec![GenotypeAllele::Unphased(0), GenotypeAllele::Unphased(1)]
+        );
+    }
+
+    #[test]
+    fn test_unphase_phased_heterozygous() {
+        let alleles = vec![GenotypeAllele::Phased(1), GenotypeAllele::Phased(0)];
+        let result = unphase_genotype(&alleles);
+        assert_eq!(
+            result,
+            vec![GenotypeAllele::Phased(0), GenotypeAllele::Phased(1)]
+        );
+    }
+
+    #[test]
+    fn test_unphase_phased_homozygous() {
+        let alleles = vec![GenotypeAllele::Phased(2), GenotypeAllele::Phased(2)];
+        let result = unphase_genotype(&alleles);
+        assert_eq!(
+            result,
+            vec![GenotypeAllele::Phased(2), GenotypeAllele::Phased(2)]
+        );
+    }
+
+    #[test]
+    fn test_unphase_with_nocall() {
+        let alleles = vec![GenotypeAllele::Unphased(1), GenotypeAllele::UnphasedMissing];
+        let result = unphase_genotype(&alleles);
+        assert_eq!(
+            result,
+            vec![GenotypeAllele::UnphasedMissing, GenotypeAllele::Unphased(1)]
+        );
+    }
+
+    #[test]
+    fn test_unphase_phased_with_nocall() {
+        let alleles = vec![GenotypeAllele::Phased(1), GenotypeAllele::PhasedMissing];
+        let result = unphase_genotype(&alleles);
+        assert_eq!(
+            result,
+            vec![GenotypeAllele::UnphasedMissing, GenotypeAllele::Phased(1)]
+        );
+    }
+
+    #[test]
+    fn test_unphase_nocall_only() {
+        let alleles = vec![
+            GenotypeAllele::UnphasedMissing,
+            GenotypeAllele::UnphasedMissing,
+        ];
+        let result = unphase_genotype(&alleles);
+        assert_eq!(
+            result,
+            vec![
+                GenotypeAllele::UnphasedMissing,
+                GenotypeAllele::UnphasedMissing
+            ]
+        );
+    }
+
+    #[test]
+    fn test_unphase_multi_allelic() {
+        let alleles = vec![GenotypeAllele::Unphased(2), GenotypeAllele::Unphased(0)];
+        let result = unphase_genotype(&alleles);
+        assert_eq!(
+            result,
+            vec![GenotypeAllele::Unphased(0), GenotypeAllele::Unphased(2)]
+        );
+    }
+
+    #[test]
+    fn test_unphase_larger_genotype() {
+        let alleles = vec![
+            GenotypeAllele::Unphased(3),
+            GenotypeAllele::Unphased(1),
+            GenotypeAllele::Unphased(2),
+            GenotypeAllele::Unphased(0),
+        ];
+        let result = unphase_genotype(&alleles);
+        assert_eq!(
+            result,
+            vec![
+                GenotypeAllele::Unphased(0),
+                GenotypeAllele::Unphased(1),
+                GenotypeAllele::Unphased(2),
+                GenotypeAllele::Unphased(3)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_unphase_with_mixed_nocalls() {
+        let alleles = vec![
+            GenotypeAllele::Unphased(1),
+            GenotypeAllele::UnphasedMissing,
+            GenotypeAllele::Unphased(2),
+        ];
+        let result = unphase_genotype(&alleles);
+        assert_eq!(
+            result,
+            vec![
+                GenotypeAllele::UnphasedMissing,
+                GenotypeAllele::Unphased(1),
+                GenotypeAllele::Unphased(2)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_unphase_phased_mixed_nocalls() {
+        let alleles = vec![
+            GenotypeAllele::Phased(1),
+            GenotypeAllele::PhasedMissing,
+            GenotypeAllele::Phased(2),
+        ];
+        let result = unphase_genotype(&alleles);
+        assert_eq!(
+            result,
+            vec![
+                GenotypeAllele::UnphasedMissing,
+                GenotypeAllele::Phased(1),
+                GenotypeAllele::Phased(2)
+            ]
+        );
+    }
+}
