@@ -1,6 +1,6 @@
 # Platinum Pedigree 
 
-This repository contains the code, data, and documentation for analyses involving the CEPH 1463 pedigree.
+This repository includes the code, data, and documentation for analyzing large pedigrees, such as CEPH-1463.
 
 ## Pipelines
 
