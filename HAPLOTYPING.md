@@ -94,6 +94,8 @@ The **PED file** describes the pedigree structure and must contain the following
 | **Mother** | Mother’s ID (0 if unknown) |
 | **Phenotype** | 0 = Unaffected, 1 = Affected |
 
+Note the phenotype field is required, but unused.
+
 ### Example PED File:
 ```
 CEPH1463    NA12889    NA    NA    1    0
