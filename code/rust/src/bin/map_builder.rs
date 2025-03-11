@@ -1061,7 +1061,7 @@ fn main() {
     iht_file
         .write(
             format!(
-                "#chrom start end {} marker_count len\n",
+                "#chrom start end {} marker_count len markers\n",
                 master_iht.legend()
             )
             .as_bytes(),

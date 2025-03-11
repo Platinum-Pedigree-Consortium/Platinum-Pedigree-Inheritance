@@ -359,7 +359,7 @@ impl Iht {
             } else {
                 default_sep
             };
-            format!("{}{}{} ", hap_a, sep, hap_b)
+            format!("{}{}{}", hap_a, sep, hap_b)
         }
 
         // Sort and add founders to the string.
