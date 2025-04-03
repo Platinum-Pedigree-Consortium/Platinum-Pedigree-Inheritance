@@ -8,18 +8,34 @@ use std::io;
 use std::path::Path;
 
 pub fn get_sample_depths(record: &Record, samples: &Vec<String>) -> Option<HashMap<String, i32>> {
-    let dp_values = record.format(b"DP").integer().ok()?; // Use `ok()?` to handle potential errors
-
-    let mut depths = HashMap::new();
-    for (i, dp_sample) in dp_values.iter().enumerate() {
-        if let Some(&depth) = dp_sample.get(0) {
-            if let Some(sample_name) = samples.get(i) {
-                depths.insert(sample_name.clone(), depth); // Clone the sample name to store as owned String
+    // Try DP field first
+    if let Ok(dp_values) = record.format(b"DP").integer() {
+        let mut depths = HashMap::new();
+        for (i, dp_sample) in dp_values.iter().enumerate() {
+            if let Some(&depth) = dp_sample.get(0) {
+                if let Some(sample_name) = samples.get(i) {
+                    depths.insert(sample_name.clone(), depth);
+                }
             }
         }
+        return Some(depths);
     }
 
-    Some(depths) // Wrap in `Some()` to match the function signature
+    // Fallback to SD field sum
+    if let Ok(sd_values) = record.format(b"SD").integer() {
+        let mut depths = HashMap::new();
+        for (i, sd_sample) in sd_values.iter().enumerate() {
+            let sum: i32 = sd_sample.iter().filter_map(|x| Some(*x)).sum();
+            if let Some(sample_name) = samples.get(i) {
+                depths.insert(sample_name.clone(), sum);
+            }
+        }
+        return Some(depths);
+    }
+
+    // Neither DP nor SD present
+    warn!("No field, DP or SD, skipping variant.");
+    None
 }
 
 pub fn is_vcf_indexed(vcf_path: &str) -> io::Result<bool> {
@@ -40,6 +56,7 @@ pub fn is_vcf_indexed(vcf_path: &str) -> io::Result<bool> {
 /// # Returns
 /// - `true` if any sample has a depth of less than 10 or missing.
 /// - `false` if all samples have valid depths and alleles.
+
 pub fn has_missing_alleles(
     genotype_data: &HashMap<String, (i32, Vec<GenotypeAllele>)>,
     min: i32,
