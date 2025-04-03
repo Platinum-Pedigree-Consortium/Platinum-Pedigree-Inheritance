@@ -9,12 +9,12 @@ use concordance::iht::parse_ihtv2_file;
 use concordance::ped::Family;
 use concordance::utils::get_sample_depths;
 use concordance::utils::is_vcf_indexed;
-use log::debug;
-use log::info;
-use log::warn;
+use log::trace;
 use log::LevelFilter;
+use log::{debug, info, warn};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
+use std::io;
 use std::io::Write;
 use std::path::Path;
 use std::process;
@@ -58,6 +58,47 @@ struct Args {
     /// Verbosity
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count, default_value_t = 0)]
     verbosity: u8,
+}
+
+fn get_samples(vcf_path: &str) -> io::Result<Vec<String>> {
+    let bcf = IndexedReader::from_path(vcf_path).expect("Error opening vcf file.");
+    let header = bcf.header();
+
+    let samples: Vec<String> = header
+        .samples()
+        .iter()
+        .map(|s| String::from_utf8_lossy(s).to_string())
+        .collect();
+    debug!("Loaded samples from VCF header OK.");
+    Ok(samples)
+}
+
+fn check_individuals_in_vcf(ped_path: &str, vcf_path: &str) -> io::Result<()> {
+    let family = Family::parse_ped_file(ped_path)?;
+    let ped_ids: std::collections::HashSet<_> = family.get_individuals_ids().into_iter().collect();
+
+    let vcf_samples = get_samples(vcf_path).unwrap();
+    let vcf_sample_set: std::collections::HashSet<_> = vcf_samples.iter().collect();
+
+    // Check that all PED individuals are in the VCF
+    for id in &ped_ids {
+        if !vcf_sample_set.contains(id) {
+            warn!(
+                "Individual ID {} from PED file is not found in the VCF header.",
+                id
+            );
+        }
+    }
+
+    // Check that all VCF samples are in the PED
+    for id in &vcf_samples {
+        if !ped_ids.contains(id) {
+            warn!("VCF sample {} is not found in the PED file.", id);
+        }
+    }
+
+    debug!("Cross-validated VCF and PED files: all samples and IDs match.");
+    Ok(())
 }
 
 /// Converts a `HashMap<String, (i32, Vec<GenotypeAllele>)>`
@@ -265,7 +306,7 @@ fn find_best_phase_orientation(
 
 fn calculate_fraction(numerator: f64, denominator: f64) -> Option<f64> {
     if denominator == 0.0 {
-        None // Return None if division by zero
+        Some(0.0) // Return None if division by zero
     } else {
         Some(numerator / denominator)
     }
@@ -295,6 +336,10 @@ fn main() {
             eprintln!("Error checking VCF index: {}", e);
             process::exit(1); // Exit with a non-zero status code for errors
         }
+    }
+
+    if let Err(e) = check_individuals_in_vcf(&args.ped, &args.vcf) {
+        warn!("Error while checking individuals in VCF: {}", e);
     }
 
     let family = Family::parse_ped_file(&args.ped).unwrap();
@@ -367,11 +412,6 @@ fn main() {
     for v in iht_info {
         debug!("{} {} {} {}", v.bed.chrom, v.bed.start, v.bed.end, v.iht);
 
-        let mut passing_count = 0;
-        let mut failing_count = 0;
-        let mut nocall_count = 0;
-        let mut low_qual_count = 0;
-
         let mut failed_singletons: HashMap<String, i32> = HashMap::new();
 
         // Convert start and end positions safely
@@ -384,11 +424,19 @@ fn main() {
 
         let chrom_id = reader.header().name2rid(v.bed.chrom.as_bytes()).unwrap();
 
-        // Fetch the records using the sequence index and converted start/end
-        let _rv = reader.fetch(chrom_id, start, end);
+        if let Err(_e) = reader.fetch(chrom_id, start, end) {
+            continue;
+        }
+
+        let mut passing_count = 0;
+        let mut failing_count = 0;
+        let mut nocall_count = 0;
+        let mut low_qual_count = 0;
+        let mut n_records = 0;
 
         for r in reader.records() {
             let record = r.unwrap();
+            n_records += 1;
             let parsed_record = parse_vcf_record(&v.bed.chrom, &record, &samples);
 
             if record.qual() < args.qual {
@@ -464,6 +512,7 @@ fn main() {
                 let convert_genos = convert_genotype_map(&parsed_record.1);
                 let br = best_results.0.unwrap().clone();
                 let loaded = br.assign_genotypes(&convert_genos, false);
+                trace!("{:#?}", parsed_record);
 
                 for s in &samples {
                     if loaded.1.contains_key(s) {
@@ -493,16 +542,19 @@ fn main() {
         total_nocall_count += nocall_count;
         total_low_qual_count += low_qual_count;
 
-        info!(
-            "Region {}:{}-{} - Passing: {} Failing: {} Nocall: {} Low-qual: {}",
-            v.bed.chrom,
-            v.bed.start,
-            v.bed.end,
-            passing_count,
-            failing_count,
-            nocall_count,
-            low_qual_count
-        );
+        if n_records > 0 {
+            info!(
+                "Region {}:{}-{} - Passing: {} Failing: {} Nocall: {} Low-qual: {} N-records: {}",
+                v.bed.chrom,
+                v.bed.start,
+                v.bed.end,
+                passing_count,
+                failing_count,
+                nocall_count,
+                low_qual_count,
+                n_records,
+            );
+        }
 
         let singletons = failed_singletons
             .iter()
@@ -532,7 +584,7 @@ fn main() {
             .unwrap();
     }
     info!(
-        "Total - Passing: {} Failing: {} Nocall {} Low-qual {}",
+        "Total - Passing: {} Failing: {} Nocall: {} Low-qual: {}",
         total_passing_count, total_failing_count, total_nocall_count, total_low_qual_count
     );
 }
