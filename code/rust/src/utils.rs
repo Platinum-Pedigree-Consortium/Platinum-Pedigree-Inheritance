@@ -21,11 +21,11 @@ pub fn get_sample_depths(record: &Record, samples: &Vec<String>) -> Option<HashM
         return Some(depths);
     }
 
-    // Fallback to SD field sum
-    if let Ok(sd_values) = record.format(b"SD").integer() {
+    // Fallback to AD field sum
+    if let Ok(ad_values) = record.format(b"AD").integer() {
         let mut depths = HashMap::new();
-        for (i, sd_sample) in sd_values.iter().enumerate() {
-            let sum: i32 = sd_sample.iter().filter_map(|x| Some(*x)).sum();
+        for (i, ad_sample) in ad_values.iter().enumerate() {
+            let sum: i32 = ad_sample.iter().copied().sum();
             if let Some(sample_name) = samples.get(i) {
                 depths.insert(sample_name.clone(), sum);
             }
@@ -33,8 +33,20 @@ pub fn get_sample_depths(record: &Record, samples: &Vec<String>) -> Option<HashM
         return Some(depths);
     }
 
-    // Neither DP nor SD present
-    warn!("No field, DP or SD, skipping variant.");
+    // Fallback to SD field sum
+    if let Ok(sd_values) = record.format(b"SD").integer() {
+        let mut depths = HashMap::new();
+        for (i, sd_sample) in sd_values.iter().enumerate() {
+            let sum: i32 = sd_sample.iter().copied().sum();
+            if let Some(sample_name) = samples.get(i) {
+                depths.insert(sample_name.clone(), sum);
+            }
+        }
+        return Some(depths);
+    }
+
+    // Neither DP, AD, nor SD present
+    warn!("No field DP, AD, or SD, skipping variant.");
     None
 }
 
