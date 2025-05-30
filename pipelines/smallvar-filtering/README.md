@@ -1,14 +1,35 @@
-## Preparing data for inheritance filtering
-Pre selecting the G2/G2 samples, filtering out sites were variants are all hom ref, and removing gap bases.
+## V1.1 truthset generation
+
+### requirements
+- vcflib
+- bedtools
+- aardvark
+- snakemake
+
+### input data
+
+The input data can be found on Amazon S3:
+
 ```
- bcftools view --trim-alt-alleles --samples NA12879,NA12881,NA12882,NA12883,NA12884,NA12885,NA12886,NA12887,NA12877,NA12878 --regions chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22,chrX hifi_joint.vcf.gz |  bcftools +fill-tags | bcftools view -i '(AC > 0)' | bedtools subtract -header -A -a - -b human_GRCh38_no_alt_analysis_set_N.1bp-slop.bed > hifi_joint_g2g3.vcf
- bcftools view --trim-alt-alleles --samples NA12879,NA12881,NA12882,NA12883,NA12884,NA12885,NA12886,NA12887,NA12877,NA12878 --regions chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22,chrX ilmn_joint.bcf    |  bcftools +fill-tags | bcftools view -i '(AC > 0)' | bedtools subtract -header -A -a - -b human_GRCh38_no_alt_analysis_set_N.1bp-slop.bed > ilmn_joint_g2g3.vcf
- bcftools view --trim-alt-alleles --samples NA12879,NA12881,NA12882,NA12883,NA12884,NA12885,NA12886,NA12887,NA12877,NA12878 --regions chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22,chrX ont_joint.vcf.gz  |  bcftools +fill-tags | bcftools view -i '(AC > 0)' | bedtools subtract -header -A -a - -b human_GRCh38_no_alt_analysis_set_N.1bp-slop.bed > ont_joint_g2g3.vcf
- bcftools view --trim-alt-alleles --samples NA12879,NA12881,NA12882,NA12883,NA12884,NA12885,NA12886,NA12887,NA12877,NA12878 --regions chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22,chrX pav_joint.vcf.gz  |  bcftools +fill-tags | bcftools view -i '(AC > 0)' | bedtools subtract -header -A -a - -b human_GRCh38_no_alt_analysis_set_N.1bp-slop.bed > pav_joint_g2g3.vcf
- bcftools view --trim-alt-alleles --samples NA12879,NA12881,NA12882,NA12883,NA12884,NA12885,NA12886,NA12887,NA12877,NA12878 --regions chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22,chrX hifi_clair3.vcf.gz  |  bcftools +fill-tags | bcftools view -i '(AC > 0)' | bedtools subtract -header -A -a - -b human_GRCh38_no_alt_analysis_set_N.1bp-slop.bed > hifi_clair3_g2g3.vcf
-bcftools view  --trim-alt-alleles --samples NA12879,NA12881,NA12882,NA12883,NA12884,NA12885,NA12886,NA12887,NA12877,NA12878 --regions chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22,chrX ilmn_dragen_reheader.vcf.gz  |  bcftools +fill-tags | bcftools view -i '(AC > 0)' | bedtools subtract -header -A -a - -b human_GRCh38_no_alt_analysis_set_N.1bp-slop.bed > ilmn_dragen_g2g3.vcf
-bcftools view --trim-alt-alleles --samples NA12879,NA12881,NA12882,NA12883,NA12884,NA12885,NA12886,NA12887,NA12877,NA12878 --regions chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22,chrX CEPH1463.joint.dnascope.vcf.gz  |  bcftools +fill-tags | bcftools view -i '(AC > 0)' | bedtools subtract -header -A -a - -b human_GRCh38_no_alt_analysis_set_N.1bp-slop.bed > hifi_dnascope_g2g3.vcf
+s3://platinum-pedigree-data/truthset_v1.1/small-variant-input
 ```
 
-# running the snakemake
-snakemake -s inheritance_filtering.sn --configfile config.json --cores 3 -p
+For more information on public datasets see:
+
+[platinum pedigree](https://github.com/Platinum-Pedigree-Consortium/Platinum-Pedigree-Datasets)
+
+### Running the pipeline
+
+1. Getting the data in place:
+```
+ aws s3 cp --no-sign-request s3://platinum-pedigree-data/truthset_v1.1/small-variant-input input --recusive 
+ ```
+
+3. Edit config json
+- You need the path to the GRCh38 reference.
+- You need to make sure that input data folder is in place and relative to the config paths.
+
+2. Running the snakemake
+```
+ snakemake --cores 20 --configfile truthset-v1_1.json  -s truthset-v1_1.snakemake --verbose -p
+```

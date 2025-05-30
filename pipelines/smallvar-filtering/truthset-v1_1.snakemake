@@ -1,0 +1,321 @@
+
+CALLERS = list(config["variants"]["raw"].keys())
+print(CALLERS)
+
+REPLICATES = list(config["reps"].keys())
+
+def _get_rep_vcf(wildcards):
+    return config["reps"][wildcards.rep]
+
+def _get_vcf(wildcards):
+    return config["variants"]["raw"][wildcards.caller]
+
+rule gather:
+     input: expand("output/compare-reps/{rep}/query.vcf.gz", rep=REPLICATES )
+
+rule aardvark_compare_replicates:
+    message:
+        "Benchmarking queries."
+    input:
+        reference = config["reference"]["seq"],
+        query_vcf = _get_rep_vcf,
+        truth_vcf = "output/truthset/NA12878_hq_v1.1.vcf.gz",
+        regions = "output/truthset/NA12878_hq_v1.1.bed.gz"
+    output:
+        dir = directory("output/compare-reps/{rep}"),
+        query = "output/compare-reps/{rep}/query.vcf.gz"
+    threads: 10
+    params:
+        label = lambda wc: wc.rep
+    shell:
+        """
+        aardvark compare \
+            -r {input.reference} \
+            --query-vcf {input.query_vcf} \
+            --truth-vcf {input.truth_vcf} \
+            --confidence-regions {input.regions} \
+            --threads {threads} \
+            --output-dir {output.dir} \
+            --compare-label {params.label}
+        """
+
+rule finalize:
+    message:
+        "Finalizing v1.1 truth set."
+    input: 
+        fai = config["reference"]["fai"],
+        bed="output/beds/hq_regions_v1.1.bed",
+        vcf="output/merged-variants/passing.vcf.gz"
+    output:
+        vcf="output/truthset/NA12878_hq_v1.1.vcf.gz",
+        bed="output/truthset/NA12878_hq_v1.1.bed.gz"
+    shell: 
+        """
+            bedtools intersect -header -a {input.vcf} -b {input.bed} >  output/truthset/NA12878_hq_v1.1.vcf
+            bgzip output/truthset/NA12878_hq_v1.1.vcf 
+            tabix -p vcf output/truthset/NA12878_hq_v1.1.vcf.gz
+            cat {input.bed} > output/truthset/NA12878_hq_v1.1.bed
+            bgzip output/truthset/NA12878_hq_v1.1.bed
+            tabix -p bed output/truthset/NA12878_hq_v1.1.bed.gz    
+            bcftools +counts {output.vcf} > output/truthset/NA12878_hq_v1.1.counts.txt
+            bedtools summary -i {output.bed} -g {input.fai} > output/truthset/NA12878_hq_v1.1.bed.summary
+        """
+
+rule smooth:
+    message:
+        "Running smoothers over the high confidence regions." 
+    input: 
+        bed ="output/beds/hq_regions_pre_smooth.bed",
+        fai = config["reference"]["fai"]
+    output: 
+        "output/beds/hq_regions_v1.1.bed"
+    params:
+        fraction_small = 0.75,
+        fraction_large = 0.90,
+        smallest = 50
+    shell: 
+        """
+          bedtools makewindows -g {input.fai} -w 10000 -s 1000 > output/beds/10k-1k.bed
+          bedtools makewindows -g {input.fai} -w 100 -s 50 > output/beds/100bp-50bp.bed
+          bedtools coverage -a output/beds/10k-1k.bed -b {input.bed} \
+          | perl -lane 'print if $F[-1] < {params.fraction_large}' > output/beds/to_gap_out.bed
+          bedtools coverage -a output/beds/100bp-50bp.bed -b {input.bed} \
+          | perl -lane 'print if $F[-1] < {params.fraction_small}' >> output/beds/to_gap_out.bed
+          bedtools subtract -a {input.bed} -b output/beds/to_gap_out.bed \
+          | perl -lane 'print if ($F[2] - $F[1]) > {params.smallest}' > {output}
+        """
+
+rule merge_hqs:
+    message: "Merging v1 truthset regions with v1.1 assembly regions, and removing problem regions."
+    input:
+        asm="output/beds/assembly_good_regions.bed",
+        hq="inputs/beds/hq_regions_final_v1.bed",
+        problems="output/beds/merged_remove_regions.bed"
+    output:
+        "output/beds/hq_regions_pre_smooth.bed"
+    shell:
+        """
+            cat {input.asm} {input.hq} \
+                | bedtools sort -i - \
+                | bedtools merge -i - \
+                | bedtools subtract -a - -b {input.problems} > {output}
+        """
+
+rule asm_ok_regions:
+    message:
+        "Intersecting assembly ok regions with depth OK regions."
+    input:
+        ped_okay_asm = "inputs/beds/gw-asm-pedigree-good-merged.bed",
+        dipcall_ok = "inputs/beds/NA12878_DEFAULT.dip.bed",
+        depth_ok = "inputs/beds/10-fold-ont-and-hifi.bed"
+    output: 
+        "output/beds/assembly_good_regions.bed"
+    shell: 
+        """
+        bedtools intersect -a {input.ped_okay_asm} \
+        -b {input.dipcall_ok} \
+        | bedtools intersect -a - -b {input.depth_ok} > {output}
+        """
+
+rule merge_bad:
+    message:
+        "Merging problematic regions."
+    input: 
+        large_indel="output/beds/large_indels.bed",
+        shared_fp="output/beds/shared_fp_regions_to_remove.bed",
+        nbases="inputs/beds/N-bases-in-38-10bp-slop.bed",
+        gaps="inputs/beds/N-bases-in-38-10bp-slop.bed",
+        missing_hap="inputs/beds/N-bases-in-38-10bp-slop.bed",
+        annotation_cnv="inputs/beds/annotation_and_common_cnv.hg38.bed",
+        odd="inputs/beds/GRCh38.oddRegions.bed",
+        svs="inputs/beds/genotyped.sv.na12878.passinv.ge50.exclusion.bed",
+        merge_issue="output/beds/merge_novar_issues.bed",
+        asm_errors="output/beds/assembly_issues.bed",
+    output: 
+        "output/beds/merged_remove_regions.bed"
+    shell: 
+        """
+        cat {input} | cut -f 1-3 | bedtools sort -i - | bedtools merge -i - > {output}
+        """
+
+rule get_assembly_issues:
+    message:
+        "Discovering regions with assembly issues across the pedigree, either too many ctgs or too few over a region. Six or more issues across the predigree are a failure."
+    input: 
+        bed="inputs/beds/gw-results.bed"
+    output:
+        "output/beds/assembly_issues.bed"
+    params:
+        nerrors=6
+    shell:
+        """
+           cat  {input.bed} |  perl -lane 'print if $F[4] >= {params.nerrors} || $F[5] >= {params.nerrors}' | bedtools merge -i -  > {output}
+        """
+
+rule get_large_indels:
+    message:
+        "Finding large indels from merged variants and converting to regions."
+    input:
+        vcf = "output/merged-variants/passing.vcf.gz",
+        fai = config["reference"]["fai"]
+    output:
+        bed = "output/beds/large_indels.bed"
+    params: 
+        slop = 10,
+        size = 50
+    shell:
+        """
+        vcflength {input.vcf} | \
+        bcftools query -f '%CHROM\t%POS0\t%END\t%TYPE\t%length\n' | \
+        perl -lane 'print if abs($F[-1]) >= {params.size}' | \
+        bedtools slop -i - -g {input.fai} -b {params.slop} | \
+        bedtools merge -i - > {output.bed}
+        """
+
+rule get_fp_regions:
+    message:
+        "Converting pre pedigree filtered FPs into regions."
+    input:
+        vcf = "output/merged-fp-variants/passing.vcf.gz",
+        fai = config["reference"]["fai"]
+    output:
+        bed = "output/beds/shared_fp_regions_to_remove.bed"
+    params: 
+        slop = 10
+    shell:
+        """
+        vcflength {input.vcf} | \
+        bcftools query -f '%CHROM\t%POS0\t%END\t%TYPE\t%length\n' | \
+        bedtools slop -i - -g {input.fai} -b {params.slop} | \
+        bedtools merge -i - > {output.bed}
+        """
+
+rule merge_fp_variants:
+    message: 
+        "Merging pre pedigree filtered FPs using majority mode."
+    input:
+        fps = expand("output/fps-{caller}/FP.vcf.gz", caller=CALLERS),
+        reference = config["reference"]["seq"],
+        regions = config["reference"]["chromosomes"]
+    output:
+        dir=directory("output/merged-fp-variants"),
+        vcf="output/merged-fp-variants/passing.vcf.gz"
+    threads: 10
+    run:
+        input_vcfs = " ".join(f"--input-vcf {vcf}" for vcf in input.fps)
+        tags = " ".join(f"--vcf-tag {caller}" for caller in CALLERS)
+        samples = " ".join(["--vcf-sample NA12878"] * len(CALLERS))
+
+        shell(f"""
+            aardvark merge \
+                --merge-strategy majority \
+                --regions {input.regions} \
+                --reference {input.reference} \
+                {input_vcfs} \
+                {tags} \
+                --output-vcfs {output.dir} \
+                --threads {threads} \
+                {samples} \
+        """)
+
+rule get_fps:
+    message: 
+        "Pulling the FP variants."
+    input:
+        "output/compare-{caller}/query.vcf.gz"
+    output:
+        "output/fps-{caller}/FP.vcf.gz"
+    shell:
+        """
+        bcftools view -i 'FORMAT/BD ~ "FP"' -Oz {input} > {output} ; tabix -p vcf {output}
+        """
+
+rule aardvark_compare:
+    message: 
+        "Discovering pre filtered variants that are marked as FPs against merged variants."
+    input:
+        reference = config["reference"]["seq"],
+        query_vcf = _get_vcf,
+        truth_vcf = "output/merged-variants-nosv/passing.nosv.vcf.gz",
+        regions = config["reference"]["chromosomes"]
+    output:
+        dir=directory("output/compare-{caller}"),
+        query="output/compare-{caller}/query.vcf.gz"
+    threads: 10
+    params:
+        label = lambda wc: f"{wc.caller}"
+    shell:
+        """
+        aardvark compare \
+            -r {input.reference} \
+            --query-vcf {input.query_vcf} \
+            --truth-vcf {input.truth_vcf} \
+            --query-sample NA12878 \
+            --confidence-regions {input.regions} \
+            --threads {threads} \
+            --output-dir {output.dir} \
+            --compare-label {params.label}
+        """
+
+rule zero_var:
+    message: 
+        "Finding merged regions that contain no variants."
+    input: 
+        vcf="output/merged-variants/passing.vcf.gz",
+        bed="output/merged-variants/regions.bed.gz"
+    output:
+        "output/beds/merge_novar_issues.bed"
+    shell:
+        """
+            bedtools intersect -c -a {input.bed} -b {input.vcf} \
+             | perl -lane 'print if $F[-1] == 0' > {output}
+        """
+
+rule prune_svs:
+    message: 
+        "Removing large indels from merged variant VCF."
+    input:
+        vcf="output/merged-variants/passing.vcf.gz",
+    output:
+        filt="output/merged-variants-nosv/passing.nosv.vcf.gz"
+    shell:
+        """
+            # keeping snps and indels less than 50bp
+            bcftools view -i '(ILEN > -50 && ILEN < 50 || type="snp")' -O z {input} > {output}
+            tabix -f -p vcf {output}
+        """
+
+
+rule aardvark_merge_filt:
+    message: 
+        "Merging hifi-deepvariant, genome assembly, illumina-dragen, and ONT-clair3 pedigree OK calls."
+    input:
+        reference = config["reference"]["seq"],
+        regions = config["reference"]["chromosomes"],
+        vcfs = lambda wc: [config["variants"]["filt"][k] for k in ["hifi", "illumina", "ont", "assembly"]]
+    output:
+        dir=directory("output/merged-variants"),
+        vcf="output/merged-variants/passing.vcf.gz",
+        bed="output/merged-variants/regions.bed.gz"
+    threads: 20
+    run:
+        tags = ["hifi", "illumina", "ont", "assembly"]
+        samples = ["NA12878", "NA12878", "NA12878"]
+
+        input_vcfs = " ".join(f"--input-vcf {vcf}" for vcf in input.vcfs)
+        vcf_tags = " ".join(f"--vcf-tag {tag}" for tag in tags)
+        vcf_samples = " ".join(f"--vcf-sample {sample}" for sample in samples)
+
+        shell(f"""
+            aardvark merge \
+                --merge-strategy all \
+                --reference {input.reference} \
+                {input_vcfs} \
+                {vcf_tags} \
+                --output-vcfs {output.dir} \
+                --threads {threads} \
+                {vcf_samples} \
+                --regions {input.regions} \
+                --conflict-select 3
+            tabix -p vcf -f {output.vcf}
+        """)
