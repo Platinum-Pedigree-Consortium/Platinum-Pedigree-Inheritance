@@ -18,7 +18,7 @@ For more information on public datasets see:
 
 [platinum pedigree](https://github.com/Platinum-Pedigree-Consortium/Platinum-Pedigree-Datasets)
 
-### Running the pipline
+### Running the pipeline
 
 1. Getting the data in place:
 ```
