@@ -1069,7 +1069,7 @@ fn main() {
         .unwrap();
 
     marker_file
-        .write(format!("#chom pos {}\n", master_iht.legend()).as_bytes())
+        .write(format!("#chom pos {} info\n", master_iht.legend()).as_bytes())
         .unwrap();
 
     recomb_file
@@ -1121,17 +1121,6 @@ fn main() {
             // backfilling the other founder allele in kinships (multi-child families)
             let backfilled = backfill_sibs(&family, &local_iht, &zygosity);
 
-            /*             if all_sibs_have_same_haplotype(&family, &backfilled) {
-                debug!(
-                    "All sibs share same marker {} {} {}",
-                    gs.0.chrom,
-                    gs.0.start,
-                    backfilled.collapse_to_string()
-                );
-                continue;
-            }
-            */
-
             marker_info.insert(gs.0.start, marker_to_string(&markers.1));
 
             pre_vector.push(IhtVec {
@@ -1151,6 +1140,14 @@ fn main() {
         );
 
         for m in &pre_vector {
+            let child_alleles = m.iht.get_non_missing_child_alleles();
+            let mut assignment: Vec<String> = Vec::new();
+
+            for a in child_alleles {
+                let children = m.iht.get_children_by_allele(a);
+                assignment.push(format!("{}:{}", a, children.join(",")));
+            }
+
             marker_file
                 .write(
                     format!(
@@ -1158,7 +1155,7 @@ fn main() {
                         m.bed.chrom,
                         m.bed.start,
                         m.iht.collapse_to_string(),
-                        marker_info.get(&m.bed.start).unwrap(),
+                        assignment.join(";")
                     )
                     .as_bytes(),
                 )
