@@ -539,6 +539,16 @@ impl Iht {
         non_missing
     }
 
+    pub fn get_children_by_allele(&self, allele: char) -> Vec<String> {
+        let mut children: Vec<String> = Vec::new();
+        for (id, (hap_a, hap_b)) in &self.children {
+            if *hap_a == allele || *hap_b == allele {
+                children.push(id.clone());
+            }
+        }
+        children
+    }
+
     /// Returns a HashSet of all non-'?' characters present in the children
     /// **only for children of founders with multiple children**.
     pub fn get_flipable_alleles(&self, family: &Family) -> HashSet<char> {
